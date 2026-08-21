@@ -1,0 +1,103 @@
+diff --git a/backend/package.json b/backend/package.json
+index 0050818..7dec19d 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -1,4 +1,4 @@
+-﻿{
++{
+   "name": "lcc-app-backend",
+   "version": "1.0.0",
+   "description": "Express backend for repair shop app",
+diff --git a/backend/server.js b/backend/server.js
+index 370e062..d1334f5 100644
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -1,4 +1,4 @@
+-﻿import express from "express";
++import express from "express";
+ import cors from "cors";
+ import dotenv from "dotenv";
+ import mysql from "mysql2/promise";
+diff --git a/frontend/public/index.html b/frontend/index.html
+similarity index 93%
+rename from frontend/public/index.html
+rename to frontend/index.html
+index 3cd95d1..129d2d3 100644
+--- a/frontend/public/index.html
++++ b/frontend/index.html
+@@ -1,4 +1,4 @@
+-﻿<!DOCTYPE html>
++<!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+diff --git a/frontend/package.json b/frontend/package.json
+index a15d71b..d4e1f9e 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -1,4 +1,4 @@
+-﻿{
++{
+   "name": "lcc-app-frontend",
+   "version": "1.0.0",
+   "description": "React frontend for repair shop app",
+diff --git a/frontend/src/App.css b/frontend/src/App.css
+index cda0b1f..4c24d32 100644
+--- a/frontend/src/App.css
++++ b/frontend/src/App.css
+@@ -1,4 +1,4 @@
+-﻿/* App component styles */
++/* App component styles */
+ .app {
+   min-height: 100vh;
+   display: flex;
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index fe01b3c..0541279 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -1,4 +1,4 @@
+-﻿import { useState, useEffect } from "react";
++import { useState, useEffect } from "react";
+ import axios from "axios";
+ import "./App.css";
+ 
+diff --git a/frontend/src/index.css b/frontend/src/index.css
+index 0352953..5eed7d5 100644
+--- a/frontend/src/index.css
++++ b/frontend/src/index.css
+@@ -1,4 +1,4 @@
+-﻿* {
++* {
+   margin: 0;
+   padding: 0;
+   box-sizing: border-box;
+diff --git a/frontend/src/main.jsx b/frontend/src/main.jsx
+index ba88a3b..f18b0f0 100644
+--- a/frontend/src/main.jsx
++++ b/frontend/src/main.jsx
+@@ -1,4 +1,4 @@
+-﻿import React from "react";
++import React from "react";
+ import ReactDOM from "react-dom/client";
+ import App from "./App";
+ import "./index.css";
+diff --git a/frontend/vite.config.js b/frontend/vite.config.js
+index 018f63c..1f137db 100644
+--- a/frontend/vite.config.js
++++ b/frontend/vite.config.js
+@@ -1,4 +1,4 @@
+-﻿import { defineConfig } from "vite";
++import { defineConfig } from "vite";
+ import react from "@vitejs/plugin-react";
+ 
+ export default defineConfig({
+diff --git a/package.json b/package.json
+index 9ad102a..df372b7 100644
+--- a/package.json
++++ b/package.json
+@@ -1,4 +1,4 @@
+-﻿{
++{
+   "name": "lee-cooper-clarinet-app",
+   "version": "1.0.0",
+   "description": "Professional repair shop management app",
