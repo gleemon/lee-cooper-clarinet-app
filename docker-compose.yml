@@ -1,0 +1,46 @@
+services:
+  mariadb:
+    image: mariadb:11
+    container_name: lcc-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${REPAIR_DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: repair_shop
+      MARIADB_USER: repair_app
+      MARIADB_PASSWORD: ${REPAIR_DB_PASSWORD}
+    ports:
+      - "3307:3306"
+    volumes:
+      - lcc_mariadb_data:/var/lib/mysql
+      # Drop .sql files here to auto-run them on first container start
+      # (only fires against an empty data volume):
+      - ./docker/init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: lcc-app
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_USER: repair_app
+      DB_PASSWORD: ${REPAIR_DB_PASSWORD}
+      DB_NAME: repair_shop
+    ports:
+      - "5000:5000"
+
+volumes:
+  lcc_mariadb_data:
