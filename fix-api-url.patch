@@ -1,0 +1,18 @@
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index 0541279..b19b1bb 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -2,7 +2,12 @@ import { useState, useEffect } from "react";
+ import axios from "axios";
+ import "./App.css";
+ 
+-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
++// Same-origin by default: the frontend is served by the same Express app
++// that serves the API, so relative paths always hit the right host:port
++// regardless of whether you access it as dockernuc.local, an IP, etc.
++// Set VITE_API_URL only if the frontend is ever served from a different
++// origin than the backend.
++const API_URL = import.meta.env.VITE_API_URL || "";
+ 
+ export default function App() {
+   const [currentPage, setCurrentPage] = useState("home");
