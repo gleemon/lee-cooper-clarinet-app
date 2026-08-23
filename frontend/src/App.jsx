@@ -100,6 +100,10 @@ export default function App() {
         )}
         {currentPage === "invoices" && <InvoicesPage />}
       </main>
+
+      <footer className="footer">
+        <p>v{__APP_VERSION__}</p>
+      </footer>
     </div>
   );
 }
