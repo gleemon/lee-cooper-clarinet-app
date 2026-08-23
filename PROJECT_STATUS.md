@@ -1,0 +1,150 @@
+# Lee Cooper Clarinet — Repair Shop App: Project Status
+
+Last updated: 2026-08-23
+
+**Read this file first in any new chat about this project.** It exists so a
+fresh conversation (with no memory of prior chats) can get productive in a
+few minutes instead of needing the full history re-explained. Keep it
+updated as work progresses — future-you (or a future Claude session) is the
+audience.
+
+## What this is and why
+
+A custom repair-shop management app for Lee Cooper Clarinet, replacing the
+"Musical Instrument Repair" Notion database. The specific gap that justified
+building this: **Notion can't produce "pretty" printed receipts/invoices.**
+PDF generation is the core value proposition — everything else (customer
+records, repair tickets, parts inventory) is infrastructure in service of
+that.
+
+Stack: Node.js/Express backend (ES modules), React + Vite frontend served
+statically by Express, MariaDB 11 database, all deployed as a Docker Compose
+stack via Portainer on a self-hosted Intel NUC (reachable at
+`dockernuc.local`).
+
+Repo: `https://github.com/gleemon/lee-cooper-clarinet-app` — **this repo is
+PUBLIC.** Never commit real passwords/secrets to it. Database credentials
+are set manually as environment variables in Portainer's stack UI, not in
+any committed file.
+
+## Current deployment status
+
+- Live on the NUC via Portainer, deployed from the GitHub repo (Git
+  repository stack method — Portainer auto-clones/pulls).
+- MariaDB running in its own container (`lcc-mariadb`) with a named volume
+  (`lcc_mariadb_data`) for persistence.
+- All data from the original Notion "Musical Instrument Repair" workspace
+  has been migrated into MariaDB and verified against the live database
+  (row counts confirmed matching for all 11 tables).
+- **As of this status update, a PDF receipts/invoices feature has been
+  built and tested locally but NOT YET applied to the live NUC deployment.**
+  See "Immediate next steps" below.
+
+## Database schema
+
+11 tables, mirroring the real Notion structure (not a guess — pulled
+directly from the Notion workspace via its API):
+
+`customers`, `technicians`, `parts_vendors`, `instruments`,
+`parts_inventory`, `repairs`, `invoices`, `work_log`, `parts_used`,
+`repair_tags`, `receipts`.
+
+Every table's `id` column is `AUTO_INCREMENT`. Tables migrated from Notion
+(customers, technicians, parts_vendors, instruments, parts_inventory,
+repairs, invoices) were seeded with **fixed ids** copied from a sequential
+mapping of their Notion page ids, so foreign-key relationships from Notion
+carry over exactly — but each table's AUTO_INCREMENT counter is set to
+start past the highest migrated id, so new rows created by the app number
+correctly going forward. (Tables with no Notion-native identity — work_log,
+parts_used, repair_tags, receipts — just use plain surrogate keys.)
+
+Source files:
+- `docker/init-db/01-schema.sql` — schema, runs once on a fresh volume
+- `docker/init-db/02-seed-data.sql` — the migrated Notion data, also runs
+  once on a fresh volume (never re-run against a populated one — not
+  idempotent)
+- `docker/init-db/migrate-auto-increment.sql` — one-off script for
+  converting an *already-deployed* database to AUTO_INCREMENT ids without
+  wiping data (needed because init scripts only run against an empty
+  volume — see "Immediate next steps")
+
+## Backend API (backend/server.js)
+
+- `GET /api/health`
+- `GET /api/customers`, `POST /api/customers`
+- `GET /api/repairs`, `POST /api/repairs`, `GET /api/repairs/:id`
+- `GET /api/repairs/:id/receipt.pdf` — "Repair Estimate & Receipt" PDF
+- `GET /api/invoices`, `POST /api/invoices`, `GET /api/invoices/:id`
+- `GET /api/invoices/:id/pdf` — itemized invoice PDF (labor + parts + tax)
+
+Billing math lives in `backend/services/billing.js` and mirrors the
+formulas that used to live in Notion's rollup/formula fields: Labor Cost =
+sum(hours × technician hourly rate) for billable work_log entries; Parts
+Cost = sum(parts_used.customer_cost); Subtotal = Labor + Parts.
+
+PDF rendering lives in `backend/pdf/` (`shopInfo.js`, `receiptPdf.js`,
+`invoicePdf.js`), using `pdfkit`. Shop letterhead info (name, address,
+phone, email) is hardcoded in `shopInfo.js` from the shop's own Notion
+receipt template.
+
+## Frontend (frontend/src/App.jsx)
+
+Pages: Dashboard (mostly a stub), New Repair Intake (form exists but is
+**not yet wired to the backend** — currently just logs to console/alert),
+Active Repairs (real data, "View" opens a repair detail page), Repair
+Detail (shows status/customer/instrument/billing, links to Print Receipt
+and Create Invoice), Invoices (real data, links to each invoice's PDF).
+
+## Known issues, gotchas, and their fixes
+
+- **Portainer bind-mount path bug**: when Portainer deploys a stack from a
+  Git repo, it resolves relative bind-mount paths (e.g.
+  `./docker/init-db`) using its own internal `/data` mount, which does not
+  correspond 1:1 to the real host filesystem. Docker daemon then mounts an
+  empty directory instead of the actual checked-out files, so
+  `docker-entrypoint-initdb.d` scripts silently don't run. Root-caused but
+  not fixed at the Portainer level (too risky — that container manages
+  other unrelated stacks). **Workaround**: manually `scp` SQL files to the
+  NUC and run them with `docker exec -i lcc-mariadb mariadb -u root -p'...'
+  repair_shop < file.sql`.
+- MariaDB 11.x images renamed the `mysql` CLI binary to `mariadb`.
+- The frontend's `VITE_API_URL` must stay a relative path (empty string
+  fallback) — hardcoding `localhost:5000` broke it for any client not
+  running on the NUC itself, since the browser would try to reach its own
+  localhost.
+- Several early files had BOM encoding issues and `index.html` was in the
+  wrong location for Vite (`frontend/public/index.html` instead of
+  `frontend/index.html`) — both fixed.
+
+## Immediate next steps (in order)
+
+1. **Apply the PDF feature patch** (`pdf-receipts-invoices.patch`,
+   delivered separately) to the local repo clone: `git apply
+   pdf-receipts-invoices.patch`, review, commit, push.
+2. **Before redeploying**, run `migrate-auto-increment.sql` against the
+   live NUC database — the schema change (AUTO_INCREMENT ids) won't apply
+   itself, since init scripts don't re-run against an existing populated
+   volume. Same pattern as before: scp the file over, then
+   `docker exec -i lcc-mariadb mariadb -u root -p'yourpassword' repair_shop
+   < migrate-auto-increment.sql`.
+3. Redeploy the stack in Portainer (pull + `docker compose up -d --build`,
+   or Portainer's equivalent "pull and redeploy").
+4. Smoke-test on the live site: view a repair, print a receipt, create an
+   invoice, view its PDF.
+5. Wire up the New Repair Intake form to `POST /api/repairs` (currently a
+   stub) — first real gap after PDF receipts/invoices land.
+
+## Recommended way of working on this project going forward
+
+This app has grown past the point where one long chat thread is a good
+fit — long threads eventually hit a memory/context limit and get
+auto-summarized, which is a lossy safety net, not a plan. Going forward:
+
+- Start a new chat per feature or deployment session, and point it at this
+  file first.
+- Keep this file updated after each milestone — what's deployed, what
+  schema decisions were made and why, what's pending.
+- Paste long logs/errors as file attachments rather than inline when
+  possible, to keep any given chat leaner.
+- Treat the git repo (commits, this status file) as the source of truth,
+  not conversation history.

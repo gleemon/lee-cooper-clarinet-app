@@ -69,6 +69,18 @@ INSERT INTO invoices (id, notion_url, notion_invoice_number, name, repair_id, in
   (1, '3a45268c9d15809eb54afb7951dd0b5c', 4, 'Invoice for Full Overhaul', 12, '2026-07-21', NULL, 'Unpaid', NULL),
   (2, '3b15268c9d1580098f41c930e0a93775', 5, 'Invoice for FBMarketplace Clarinet Intake', 13, '2026-08-02', NULL, 'Unpaid', NULL);
 
+-- The tables above use fixed ids carried over from Notion (so foreign keys
+-- migrated exactly), but their id columns are AUTO_INCREMENT so the app can
+-- insert new rows going forward. Bump each counter past the highest migrated
+-- id so the next INSERT doesn't collide with Notion-sourced rows.
+ALTER TABLE customers AUTO_INCREMENT = 7;
+ALTER TABLE technicians AUTO_INCREMENT = 2;
+ALTER TABLE parts_vendors AUTO_INCREMENT = 4;
+ALTER TABLE instruments AUTO_INCREMENT = 9;
+ALTER TABLE parts_inventory AUTO_INCREMENT = 19;
+ALTER TABLE repairs AUTO_INCREMENT = 15;
+ALTER TABLE invoices AUTO_INCREMENT = 3;
+
 INSERT INTO work_log (notion_url, label, repair_id, technician_id, start_work, end_work, time_on_repair, billable) VALUES
   ('1de5268c9d1580378bdad313f3d2b7b1', 'Labor Cost', 8, 1, '2025-04-23 01:55:00', NULL, 1, 1),
   ('1df5268c9d1580a198e4fb4803ab9b3b', 'Labor Cost', 6, 1, '2025-04-24 22:01:00', NULL, 1, 1),

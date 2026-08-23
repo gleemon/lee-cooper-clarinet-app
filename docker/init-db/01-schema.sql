@@ -18,7 +18,7 @@
 -- (01-schema.sql, then 02-seed-data.sql).
 
 CREATE TABLE customers (
-  id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   notion_url VARCHAR(64) UNIQUE,          -- Notion page id, kept for traceability back to the source
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255),
@@ -33,7 +33,7 @@ CREATE TABLE customers (
 );
 
 CREATE TABLE technicians (
-  id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   notion_url VARCHAR(64) UNIQUE,
   name VARCHAR(255) NOT NULL,
   hourly_rate VARCHAR(50),                -- stored as text in Notion; consider NUMERIC once cleaned up
@@ -42,7 +42,7 @@ CREATE TABLE technicians (
 );
 
 CREATE TABLE parts_vendors (
-  id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   notion_url VARCHAR(64) UNIQUE,
   name VARCHAR(255) NOT NULL,
   website VARCHAR(255),
@@ -57,7 +57,7 @@ CREATE TABLE parts_vendors (
 );
 
 CREATE TABLE instruments (
-  id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   notion_url VARCHAR(64) UNIQUE,
   name VARCHAR(255) NOT NULL,
   type VARCHAR(100),                      -- e.g. Bb Clarinet, A Clarinet, Bass Clarinet
@@ -72,7 +72,7 @@ CREATE TABLE instruments (
 );
 
 CREATE TABLE parts_inventory (
-  id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   notion_url VARCHAR(64) UNIQUE,
   part_name VARCHAR(255) NOT NULL,
   description TEXT,
@@ -88,7 +88,7 @@ CREATE TABLE parts_inventory (
 );
 
 CREATE TABLE repairs (
-  id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   notion_url VARCHAR(64) UNIQUE,
   notion_repair_number INT,               -- the human-facing "Repair ID" ticket number from Notion
   title VARCHAR(255),
@@ -106,7 +106,7 @@ CREATE TABLE repairs (
 );
 
 CREATE TABLE invoices (
-  id INT PRIMARY KEY,
+  id INT AUTO_INCREMENT PRIMARY KEY,
   notion_url VARCHAR(64) UNIQUE,
   notion_invoice_number INT,              -- the human-facing "Invoice ID" from Notion
   name VARCHAR(255),

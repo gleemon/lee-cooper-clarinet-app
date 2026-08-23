@@ -1,0 +1,909 @@
+diff --git a/backend/pdf/invoicePdf.js b/backend/pdf/invoicePdf.js
+new file mode 100644
+index 0000000..74dafaf
+--- /dev/null
++++ b/backend/pdf/invoicePdf.js
+@@ -0,0 +1,151 @@
++import { SHOP_INFO } from "./shopInfo.js";
++
++function fmtDate(d) {
++  if (!d) return "--";
++  const date = new Date(d);
++  if (isNaN(date.getTime())) return "--";
++  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
++}
++
++function fmtMoney(n) {
++  const v = parseFloat(n);
++  return `$${(isNaN(v) ? 0 : v).toFixed(2)}`;
++}
++
++// Renders a proper line-itemized invoice: shop letterhead, customer/repair
++// info, labor line items (hours x technician rate), parts line items, then
++// subtotal / tax / total / payment status.
++export function renderInvoicePdf(doc, { invoice, repair, workLogRows, partsRows, laborCost, partsCost, subtotal, tax, total }) {
++  doc
++    .fontSize(20)
++    .font("Helvetica-Bold")
++    .text(SHOP_INFO.name, { align: "center" })
++    .fontSize(10)
++    .font("Helvetica")
++    .text(SHOP_INFO.addressLine1, { align: "center" })
++    .text(SHOP_INFO.cityStateZip, { align: "center" })
++    .text(`${SHOP_INFO.phone}  |  ${SHOP_INFO.email}`, { align: "center" });
++
++  doc.moveDown(1.5);
++  doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
++  doc.moveDown(1);
++
++  doc.fontSize(16).font("Helvetica-Bold").text("Invoice", { align: "center" });
++  doc.moveDown(1);
++
++  const leftX = 50;
++  const rightX = 320;
++  const topY = doc.y;
++
++  doc.font("Helvetica-Bold").fontSize(11).text("Bill To", leftX, topY);
++  doc.font("Helvetica").fontSize(10);
++  doc.text(repair.customer_name || "--", leftX, doc.y);
++  if (repair.address_line1) doc.text(repair.address_line1, leftX);
++  const cityLine = [repair.city, repair.state, repair.zip].filter(Boolean).join(", ");
++  if (cityLine) doc.text(cityLine, leftX);
++  if (repair.customer_phone) doc.text(repair.customer_phone, leftX);
++  if (repair.customer_email) doc.text(repair.customer_email, leftX);
++
++  doc.font("Helvetica-Bold").fontSize(11).text("Invoice Details", rightX, topY);
++  doc.font("Helvetica").fontSize(10);
++  doc.text(`Invoice #: ${invoice.notion_invoice_number ?? invoice.id}`, rightX);
++  doc.text(`Invoice Date: ${fmtDate(invoice.invoice_date)}`, rightX);
++  doc.text(`Due Date: ${fmtDate(invoice.due_date)}`, rightX);
++  doc.text(`Payment Status: ${invoice.payment_status || "Unpaid"}`, rightX);
++  doc.text(`Repair Ticket #: ${repair.notion_repair_number ?? repair.id}`, rightX);
++  if (repair.instrument_name) doc.text(`Instrument: ${repair.instrument_name}`, rightX);
++
++  doc.moveDown(2);
++  doc.y = Math.max(doc.y, topY + 90);
++
++  // -- Labor table --
++  doc.font("Helvetica-Bold").fontSize(12).text("Labor", leftX, doc.y);
++  doc.moveDown(0.3);
++  const billableLabor = workLogRows.filter((w) => w.billable);
++  if (billableLabor.length === 0) {
++    doc.font("Helvetica").fontSize(10).fillColor("#777").text("No billable labor recorded.").fillColor("black");
++  } else {
++    tableHeader(doc, ["Description", "Hours", "Rate", "Amount"], [230, 70, 90, 90]);
++    billableLabor.forEach((w) => {
++      const rate = parseFloat(w.hourly_rate) || 0;
++      const hours = parseFloat(w.time_on_repair) || 0;
++      tableRow(
++        doc,
++        [w.label || "Labor", hours.toFixed(1), fmtMoney(rate) + "/hr", fmtMoney(rate * hours)],
++        [230, 70, 90, 90]
++      );
++    });
++  }
++
++  doc.moveDown(1);
++
++  // -- Parts table --
++  doc.font("Helvetica-Bold").fontSize(12).text("Parts", leftX, doc.y);
++  doc.moveDown(0.3);
++  if (partsRows.length === 0) {
++    doc.font("Helvetica").fontSize(10).fillColor("#777").text("No parts recorded.").fillColor("black");
++  } else {
++    tableHeader(doc, ["Description", "Qty", "", "Amount"], [230, 70, 90, 90]);
++    partsRows.forEach((p) => {
++      tableRow(
++        doc,
++        [p.part_name || p.label || "Part", String(p.quantity_used ?? "1"), "", fmtMoney(p.customer_cost)],
++        [230, 70, 90, 90]
++      );
++    });
++  }
++
++  doc.moveDown(1.5);
++  doc.moveTo(320, doc.y).lineTo(545, doc.y).stroke();
++  doc.moveDown(0.5);
++
++  totalsRow(doc, "Labor Subtotal", laborCost);
++  totalsRow(doc, "Parts Subtotal", partsCost);
++  totalsRow(doc, "Subtotal", subtotal);
++  totalsRow(doc, `Tax${invoice.tax_rate ? ` (${(parseFloat(invoice.tax_rate) * 100).toFixed(1)}%)` : ""}`, tax);
++  doc.moveDown(0.2);
++  doc.font("Helvetica-Bold").fontSize(13);
++  totalsRow(doc, "Total Due", total, true);
++
++  doc.moveDown(2);
++  doc
++    .font("Helvetica")
++    .fontSize(9)
++    .fillColor("#777")
++    .text("Thank you for your business!", 50, doc.y, { align: "center" })
++    .fillColor("black");
++}
++
++function tableHeader(doc, cols, widths) {
++  const x0 = 50;
++  let x = x0;
++  doc.font("Helvetica-Bold").fontSize(9).fillColor("#555");
++  cols.forEach((c, i) => {
++    doc.text(c, x, doc.y, { width: widths[i], continued: i < cols.length - 1 });
++    x += widths[i];
++  });
++  doc.fillColor("black");
++  doc.moveDown(0.3);
++  doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#ccc").stroke().strokeColor("black");
++  doc.moveDown(0.3);
++}
++
++function tableRow(doc, cols, widths) {
++  const x0 = 50;
++  let x = x0;
++  const y = doc.y;
++  doc.font("Helvetica").fontSize(10);
++  cols.forEach((c, i) => {
++    doc.text(c, x, y, { width: widths[i] });
++    x += widths[i];
++  });
++  doc.moveDown(0.5);
++}
++
++function totalsRow(doc, label, amount, bold = false) {
++  const y = doc.y;
++  doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(bold ? 13 : 10);
++  doc.text(label, 320, y, { width: 130 });
++  doc.text(`$${(parseFloat(amount) || 0).toFixed(2)}`, 450, y, { width: 95, align: "right" });
++  doc.moveDown(0.4);
++}
+diff --git a/backend/pdf/receiptPdf.js b/backend/pdf/receiptPdf.js
+new file mode 100644
+index 0000000..7ce5343
+--- /dev/null
++++ b/backend/pdf/receiptPdf.js
+@@ -0,0 +1,91 @@
++import { SHOP_INFO } from "./shopInfo.js";
++
++function fmtDate(d) {
++  if (!d) return "TBD";
++  const date = new Date(d);
++  if (isNaN(date.getTime())) return "TBD";
++  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
++}
++
++function fmtMoney(n) {
++  if (n === null || n === undefined || n === "") return "TBD";
++  return `$${parseFloat(n).toFixed(2)}`;
++}
++
++// Renders the "Repair Estimate & Receipt" -- the intake-time document
++// (customer's copy for drop-off), matching the shop's original Notion template
++// but pulling real data instead of "see properties above".
++export function renderReceiptPdf(doc, repair) {
++  doc
++    .fontSize(20)
++    .font("Helvetica-Bold")
++    .text(SHOP_INFO.name, { align: "center" })
++    .fontSize(10)
++    .font("Helvetica")
++    .text(SHOP_INFO.addressLine1, { align: "center" })
++    .text(SHOP_INFO.cityStateZip, { align: "center" })
++    .text(`${SHOP_INFO.phone}  |  ${SHOP_INFO.email}`, { align: "center" });
++
++  doc.moveDown(1.5);
++  doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
++  doc.moveDown(1);
++
++  doc.fontSize(16).font("Helvetica-Bold").text("Repair Estimate & Receipt", { align: "center" });
++  doc.moveDown(0.3);
++  doc
++    .fontSize(10)
++    .font("Helvetica")
++    .fillColor("#555")
++    .text(
++      "Thank you for bringing your instrument in for service. Please keep this receipt -- it may be required for instrument pickup.",
++      { align: "center" }
++    )
++    .fillColor("black");
++
++  doc.moveDown(1.5);
++
++  const row = (label, value) => {
++    doc.font("Helvetica-Bold").fontSize(11).text(label, { continued: true });
++    doc.font("Helvetica").text(`  ${value ?? "--"}`);
++    doc.moveDown(0.4);
++  };
++
++  row("Repair Ticket #:", repair.notion_repair_number ?? repair.id);
++  row("Status:", repair.status);
++  row("Customer:", repair.customer_name);
++  row(
++    "Instrument:",
++    [repair.instrument_name, repair.instrument_type].filter(Boolean).join(" -- ") || "--"
++  );
++  if (repair.instrument_serial) row("Serial #:", repair.instrument_serial);
++  row("Intake Date:", fmtDate(repair.intake_date));
++  row("Estimated Completion:", fmtDate(repair.estimated_completion));
++  row("Estimated Repair Cost:", fmtMoney(repair.estimated_repair_cost));
++
++  if (repair.title) {
++    doc.moveDown(0.5);
++    doc.font("Helvetica-Bold").fontSize(11).text("Issue / Notes:");
++    doc.font("Helvetica").fontSize(11).text(repair.title);
++  }
++
++  doc.moveDown(1.5);
++  doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
++  doc.moveDown(1);
++
++  doc.font("Helvetica-Bold").fontSize(12).text("Terms");
++  doc.moveDown(0.3);
++  doc
++    .font("Helvetica")
++    .fontSize(10)
++    .list(
++      [
++        "This is an estimate only; final cost may vary if additional issues are found during diagnosis.",
++        "We will contact you before performing any work beyond the estimated cost.",
++        "Please retain this receipt -- it may be required for instrument pickup.",
++      ],
++      { bulletRadius: 2 }
++    );
++
++  doc.moveDown(2);
++  doc.font("Helvetica").fontSize(11).text("Customer signature (estimate approval): _______________________________");
++}
+diff --git a/backend/pdf/shopInfo.js b/backend/pdf/shopInfo.js
+new file mode 100644
+index 0000000..78c47ea
+--- /dev/null
++++ b/backend/pdf/shopInfo.js
+@@ -0,0 +1,9 @@
++// Shop letterhead details, pulled from the shop's own Notion receipt template.
++// If the shop's address/phone/email ever changes, update it here.
++export const SHOP_INFO = {
++  name: "Lee Cooper Clarinet",
++  addressLine1: "2108 Donnington Ct",
++  cityStateZip: "Virginia Beach, VA 23456",
++  phone: "757-717-1385",
++  email: "LeeCooperClarinet@gmail.com",
++};
+diff --git a/backend/server.js b/backend/server.js
+index 2c3d306..5baf6fb 100644
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -4,6 +4,10 @@ import dotenv from "dotenv";
+ import mysql from "mysql2/promise";
+ import path from "path";
+ import { fileURLToPath } from "url";
++import PDFDocument from "pdfkit";
++import { getRepairBillingDetails } from "./services/billing.js";
++import { renderReceiptPdf } from "./pdf/receiptPdf.js";
++import { renderInvoicePdf } from "./pdf/invoicePdf.js";
+ 
+ dotenv.config();
+ 
+@@ -60,11 +64,11 @@ app.get("/api/customers", async (req, res) => {
+ 
+ app.post("/api/customers", async (req, res) => {
+   try {
+-    const { name, email, phone, address } = req.body;
++    const { name, email, phone, address_line1, address_line2, city, state, zip, notes } = req.body;
+     const conn = await pool.getConnection();
+     const [result] = await conn.query(
+-      "INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)",
+-      [name, email, phone, address]
++      "INSERT INTO customers (name, email, phone, address_line1, address_line2, city, state, zip, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
++      [name, email, phone, address_line1, address_line2, city, state, zip, notes]
+     );
+     conn.release();
+     res.json({ id: result.insertId, ...req.body });
+@@ -89,11 +93,11 @@ app.get("/api/repairs", async (req, res) => {
+ 
+ app.post("/api/repairs", async (req, res) => {
+   try {
+-    const { customer_id, instrument_id, issue_description, estimated_cost } = req.body;
++    const { customer_id, instrument_id, technician_id, title, estimated_repair_cost, estimated_completion } = req.body;
+     const conn = await pool.getConnection();
+     const [result] = await conn.query(
+-      "INSERT INTO repairs (customer_id, instrument_id, issue_description, estimated_cost, status, intake_date) VALUES (?, ?, ?, ?, ?, NOW())",
+-      [customer_id, instrument_id, issue_description, estimated_cost, "Received"]
++      "INSERT INTO repairs (customer_id, instrument_id, technician_id, title, estimated_repair_cost, estimated_completion, status, intake_date) VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE())",
++      [customer_id, instrument_id, technician_id || null, title, estimated_repair_cost || null, estimated_completion || null, "Received"]
+     );
+     conn.release();
+     res.json({ id: result.insertId, ...req.body });
+@@ -102,16 +106,129 @@ app.post("/api/repairs", async (req, res) => {
+   }
+ });
+ 
++// Single repair, with customer/instrument/technician joined in -- used by the
++// repair detail view and as the basis for the receipt PDF.
++app.get("/api/repairs/:id", async (req, res) => {
++  try {
++    const details = await getRepairBillingDetails(pool, req.params.id);
++    if (!details) return res.status(404).json({ error: "Repair not found" });
++    res.json({
++      ...details.repair,
++      laborCost: details.laborCost,
++      partsCost: details.partsCost,
++      subtotal: details.subtotal,
++      workLog: details.workLogRows,
++      partsUsed: details.partsRows,
++    });
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++// "Repair Estimate & Receipt" PDF -- the intake-time document.
++app.get("/api/repairs/:id/receipt.pdf", async (req, res) => {
++  try {
++    const details = await getRepairBillingDetails(pool, req.params.id);
++    if (!details) return res.status(404).json({ error: "Repair not found" });
++
++    const doc = new PDFDocument({ margin: 50 });
++    res.setHeader("Content-Type", "application/pdf");
++    res.setHeader(
++      "Content-Disposition",
++      `inline; filename="receipt-${details.repair.notion_repair_number ?? details.repair.id}.pdf"`
++    );
++    doc.pipe(res);
++    renderReceiptPdf(doc, details.repair);
++    doc.end();
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
+ // Invoices
+-app.get("/api/invoices/:repair_id", async (req, res) => {
++app.get("/api/invoices", async (req, res) => {
+   try {
+     const conn = await pool.getConnection();
+     const [rows] = await conn.query(
+-      "SELECT * FROM invoices WHERE repair_id = ?",
+-      [req.params.repair_id]
++      `SELECT inv.*, r.title AS repair_title, r.notion_repair_number, r.status AS repair_status,
++              c.name AS customer_name
++       FROM invoices inv
++       LEFT JOIN repairs r ON inv.repair_id = r.id
++       LEFT JOIN customers c ON r.customer_id = c.id
++       ORDER BY inv.invoice_date DESC, inv.id DESC`
+     );
+     conn.release();
+-    res.json(rows[0] || null);
++    res.json(rows);
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++app.get("/api/invoices/:id", async (req, res) => {
++  try {
++    const conn = await pool.getConnection();
++    const [rows] = await conn.query("SELECT * FROM invoices WHERE id = ?", [req.params.id]);
++    conn.release();
++    if (!rows[0]) return res.status(404).json({ error: "Invoice not found" });
++    res.json(rows[0]);
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++// Create an invoice for a repair. due_date/tax_rate/payment_status are
++// optional -- payment_status defaults to Unpaid.
++app.post("/api/invoices", async (req, res) => {
++  try {
++    const { repair_id, name, due_date, tax_rate, payment_status } = req.body;
++    if (!repair_id) return res.status(400).json({ error: "repair_id is required" });
++    const conn = await pool.getConnection();
++    const [result] = await conn.query(
++      "INSERT INTO invoices (name, repair_id, invoice_date, due_date, payment_status, tax_rate) VALUES (?, ?, CURDATE(), ?, ?, ?)",
++      [name || null, repair_id, due_date || null, payment_status || "Unpaid", tax_rate || null]
++    );
++    conn.release();
++    res.json({ id: result.insertId, ...req.body });
++  } catch (err) {
++    res.status(500).json({ error: err.message });
++  }
++});
++
++// Itemized invoice PDF.
++app.get("/api/invoices/:id/pdf", async (req, res) => {
++  try {
++    const conn = await pool.getConnection();
++    const [invRows] = await conn.query("SELECT * FROM invoices WHERE id = ?", [req.params.id]);
++    conn.release();
++    const invoice = invRows[0];
++    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
++
++    const details = await getRepairBillingDetails(pool, invoice.repair_id);
++    if (!details) return res.status(404).json({ error: "Repair for this invoice not found" });
++
++    const taxRate = parseFloat(invoice.tax_rate) || 0;
++    const tax = details.subtotal * taxRate;
++    const total = details.subtotal + tax;
++
++    const doc = new PDFDocument({ margin: 50 });
++    res.setHeader("Content-Type", "application/pdf");
++    res.setHeader(
++      "Content-Disposition",
++      `inline; filename="invoice-${invoice.notion_invoice_number ?? invoice.id}.pdf"`
++    );
++    doc.pipe(res);
++    renderInvoicePdf(doc, {
++      invoice,
++      repair: details.repair,
++      workLogRows: details.workLogRows,
++      partsRows: details.partsRows,
++      laborCost: details.laborCost,
++      partsCost: details.partsCost,
++      subtotal: details.subtotal,
++      tax,
++      total,
++    });
++    doc.end();
+   } catch (err) {
+     res.status(500).json({ error: err.message });
+   }
+diff --git a/backend/services/billing.js b/backend/services/billing.js
+new file mode 100644
+index 0000000..ff8b8b5
+--- /dev/null
++++ b/backend/services/billing.js
+@@ -0,0 +1,59 @@
++// Repairs shop billing math -- mirrors the formulas that used to live in the
++// Notion "Repairs" and "Invoices" databases:
++//   Labor Cost  = sum(work_log.time_on_repair * technician.hourly_rate) for billable entries
++//   Parts Cost  = sum(parts_used.customer_cost)
++//   Subtotal    = Labor Cost + Parts Cost
++//   Total       = Subtotal + (Subtotal * tax_rate)
++
++export async function getRepairBillingDetails(pool, repairId) {
++  const conn = await pool.getConnection();
++  try {
++    const [repairRows] = await conn.query(
++      `SELECT r.*,
++              c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
++              c.address_line1, c.address_line2, c.city, c.state, c.zip,
++              i.name AS instrument_name, i.type AS instrument_type, i.make AS instrument_make,
++              i.model AS instrument_model, i.serial AS instrument_serial,
++              t.name AS technician_name
++       FROM repairs r
++       LEFT JOIN customers c ON r.customer_id = c.id
++       LEFT JOIN instruments i ON r.instrument_id = i.id
++       LEFT JOIN technicians t ON r.technician_id = t.id
++       WHERE r.id = ?`,
++      [repairId]
++    );
++    const repair = repairRows[0];
++    if (!repair) return null;
++
++    const [workLogRows] = await conn.query(
++      `SELECT w.label, w.time_on_repair, w.billable, w.start_work, t.hourly_rate, t.name AS technician_name
++       FROM work_log w
++       LEFT JOIN technicians t ON w.technician_id = t.id
++       WHERE w.repair_id = ?
++       ORDER BY w.start_work ASC`,
++      [repairId]
++    );
++
++    const [partsRows] = await conn.query(
++      `SELECT pu.label, pu.quantity_used, pu.customer_cost, p.part_name
++       FROM parts_used pu
++       LEFT JOIN parts_inventory p ON pu.part_id = p.id
++       WHERE pu.repair_id = ?`,
++      [repairId]
++    );
++
++    const laborCost = workLogRows.reduce((sum, w) => {
++      if (!w.billable) return sum;
++      const rate = parseFloat(w.hourly_rate) || 0;
++      const hours = parseFloat(w.time_on_repair) || 0;
++      return sum + rate * hours;
++    }, 0);
++
++    const partsCost = partsRows.reduce((sum, p) => sum + (parseFloat(p.customer_cost) || 0), 0);
++    const subtotal = laborCost + partsCost;
++
++    return { repair, workLogRows, partsRows, laborCost, partsCost, subtotal };
++  } finally {
++    conn.release();
++  }
++}
+diff --git a/docker/init-db/01-schema.sql b/docker/init-db/01-schema.sql
+index 5148ccc..32ac1e9 100644
+--- a/docker/init-db/01-schema.sql
++++ b/docker/init-db/01-schema.sql
+@@ -18,7 +18,7 @@
+ -- (01-schema.sql, then 02-seed-data.sql).
+ 
+ CREATE TABLE customers (
+-  id INT PRIMARY KEY,
++  id INT AUTO_INCREMENT PRIMARY KEY,
+   notion_url VARCHAR(64) UNIQUE,          -- Notion page id, kept for traceability back to the source
+   name VARCHAR(255) NOT NULL,
+   email VARCHAR(255),
+@@ -33,7 +33,7 @@ CREATE TABLE customers (
+ );
+ 
+ CREATE TABLE technicians (
+-  id INT PRIMARY KEY,
++  id INT AUTO_INCREMENT PRIMARY KEY,
+   notion_url VARCHAR(64) UNIQUE,
+   name VARCHAR(255) NOT NULL,
+   hourly_rate VARCHAR(50),                -- stored as text in Notion; consider NUMERIC once cleaned up
+@@ -42,7 +42,7 @@ CREATE TABLE technicians (
+ );
+ 
+ CREATE TABLE parts_vendors (
+-  id INT PRIMARY KEY,
++  id INT AUTO_INCREMENT PRIMARY KEY,
+   notion_url VARCHAR(64) UNIQUE,
+   name VARCHAR(255) NOT NULL,
+   website VARCHAR(255),
+@@ -57,7 +57,7 @@ CREATE TABLE parts_vendors (
+ );
+ 
+ CREATE TABLE instruments (
+-  id INT PRIMARY KEY,
++  id INT AUTO_INCREMENT PRIMARY KEY,
+   notion_url VARCHAR(64) UNIQUE,
+   name VARCHAR(255) NOT NULL,
+   type VARCHAR(100),                      -- e.g. Bb Clarinet, A Clarinet, Bass Clarinet
+@@ -72,7 +72,7 @@ CREATE TABLE instruments (
+ );
+ 
+ CREATE TABLE parts_inventory (
+-  id INT PRIMARY KEY,
++  id INT AUTO_INCREMENT PRIMARY KEY,
+   notion_url VARCHAR(64) UNIQUE,
+   part_name VARCHAR(255) NOT NULL,
+   description TEXT,
+@@ -88,7 +88,7 @@ CREATE TABLE parts_inventory (
+ );
+ 
+ CREATE TABLE repairs (
+-  id INT PRIMARY KEY,
++  id INT AUTO_INCREMENT PRIMARY KEY,
+   notion_url VARCHAR(64) UNIQUE,
+   notion_repair_number INT,               -- the human-facing "Repair ID" ticket number from Notion
+   title VARCHAR(255),
+@@ -106,7 +106,7 @@ CREATE TABLE repairs (
+ );
+ 
+ CREATE TABLE invoices (
+-  id INT PRIMARY KEY,
++  id INT AUTO_INCREMENT PRIMARY KEY,
+   notion_url VARCHAR(64) UNIQUE,
+   notion_invoice_number INT,              -- the human-facing "Invoice ID" from Notion
+   name VARCHAR(255),
+diff --git a/docker/init-db/02-seed-data.sql b/docker/init-db/02-seed-data.sql
+index c931cf2..585b526 100644
+--- a/docker/init-db/02-seed-data.sql
++++ b/docker/init-db/02-seed-data.sql
+@@ -69,6 +69,18 @@ INSERT INTO invoices (id, notion_url, notion_invoice_number, name, repair_id, in
+   (1, '3a45268c9d15809eb54afb7951dd0b5c', 4, 'Invoice for Full Overhaul', 12, '2026-07-21', NULL, 'Unpaid', NULL),
+   (2, '3b15268c9d1580098f41c930e0a93775', 5, 'Invoice for FBMarketplace Clarinet Intake', 13, '2026-08-02', NULL, 'Unpaid', NULL);
+ 
++-- The tables above use fixed ids carried over from Notion (so foreign keys
++-- migrated exactly), but their id columns are AUTO_INCREMENT so the app can
++-- insert new rows going forward. Bump each counter past the highest migrated
++-- id so the next INSERT doesn't collide with Notion-sourced rows.
++ALTER TABLE customers AUTO_INCREMENT = 7;
++ALTER TABLE technicians AUTO_INCREMENT = 2;
++ALTER TABLE parts_vendors AUTO_INCREMENT = 4;
++ALTER TABLE instruments AUTO_INCREMENT = 9;
++ALTER TABLE parts_inventory AUTO_INCREMENT = 19;
++ALTER TABLE repairs AUTO_INCREMENT = 15;
++ALTER TABLE invoices AUTO_INCREMENT = 3;
++
+ INSERT INTO work_log (notion_url, label, repair_id, technician_id, start_work, end_work, time_on_repair, billable) VALUES
+   ('1de5268c9d1580378bdad313f3d2b7b1', 'Labor Cost', 8, 1, '2025-04-23 01:55:00', NULL, 1, 1),
+   ('1df5268c9d1580a198e4fb4803ab9b3b', 'Labor Cost', 6, 1, '2025-04-24 22:01:00', NULL, 1, 1),
+diff --git a/docker/init-db/migrate-auto-increment.sql b/docker/init-db/migrate-auto-increment.sql
+new file mode 100644
+index 0000000..a3e977a
+--- /dev/null
++++ b/docker/init-db/migrate-auto-increment.sql
+@@ -0,0 +1,56 @@
++-- One-off migration for the ALREADY-DEPLOYED live database.
++--
++-- docker-entrypoint-initdb.d scripts (01-schema.sql, 02-seed-data.sql) only
++-- run automatically the first time a mariadb container starts against an
++-- EMPTY data volume. The live NUC deployment already has data in its volume,
++-- so it never re-ran those files and its `id` columns are still plain
++-- `INT PRIMARY KEY` (no AUTO_INCREMENT). This script brings a live database
++-- up to date without touching any existing rows.
++--
++-- Run it once against the live database, e.g.:
++--   docker exec -i lcc-mariadb mariadb -u root -p'yourpassword' repair_shop < migrate-auto-increment.sql
++--
++-- Safe to run only once. Running it again is harmless (MODIFY/ALTER are
++-- idempotent no-ops if already applied) but there's no need to repeat it.
++
++ALTER TABLE customers MODIFY id INT AUTO_INCREMENT;
++ALTER TABLE technicians MODIFY id INT AUTO_INCREMENT;
++ALTER TABLE parts_vendors MODIFY id INT AUTO_INCREMENT;
++ALTER TABLE instruments MODIFY id INT AUTO_INCREMENT;
++ALTER TABLE parts_inventory MODIFY id INT AUTO_INCREMENT;
++ALTER TABLE repairs MODIFY id INT AUTO_INCREMENT;
++ALTER TABLE invoices MODIFY id INT AUTO_INCREMENT;
++
++-- Set each counter to start past whatever the highest existing id is, so the
++-- very next insert can't collide with migrated Notion rows. MariaDB's ALTER
++-- TABLE ... AUTO_INCREMENT = N requires a literal, so this computes N with a
++-- tiny bit of dynamic SQL rather than hardcoding it -- safe to run even if
++-- you've added a few rows by hand since the migration.
++SET @next_customers = (SELECT COALESCE(MAX(id), 0) + 1 FROM customers);
++SET @next_technicians = (SELECT COALESCE(MAX(id), 0) + 1 FROM technicians);
++SET @next_parts_vendors = (SELECT COALESCE(MAX(id), 0) + 1 FROM parts_vendors);
++SET @next_instruments = (SELECT COALESCE(MAX(id), 0) + 1 FROM instruments);
++SET @next_parts_inventory = (SELECT COALESCE(MAX(id), 0) + 1 FROM parts_inventory);
++SET @next_repairs = (SELECT COALESCE(MAX(id), 0) + 1 FROM repairs);
++SET @next_invoices = (SELECT COALESCE(MAX(id), 0) + 1 FROM invoices);
++
++SET @sql = CONCAT('ALTER TABLE customers AUTO_INCREMENT = ', @next_customers);
++PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
++
++SET @sql = CONCAT('ALTER TABLE technicians AUTO_INCREMENT = ', @next_technicians);
++PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
++
++SET @sql = CONCAT('ALTER TABLE parts_vendors AUTO_INCREMENT = ', @next_parts_vendors);
++PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
++
++SET @sql = CONCAT('ALTER TABLE instruments AUTO_INCREMENT = ', @next_instruments);
++PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
++
++SET @sql = CONCAT('ALTER TABLE parts_inventory AUTO_INCREMENT = ', @next_parts_inventory);
++PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
++
++SET @sql = CONCAT('ALTER TABLE repairs AUTO_INCREMENT = ', @next_repairs);
++PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
++
++SET @sql = CONCAT('ALTER TABLE invoices AUTO_INCREMENT = ', @next_invoices);
++PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index b19b1bb..4dab873 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -14,6 +14,7 @@ export default function App() {
+   const [repairs, setRepairs] = useState([]);
+   const [customers, setCustomers] = useState([]);
+   const [loading, setLoading] = useState(false);
++  const [selectedRepairId, setSelectedRepairId] = useState(null);
+ 
+   // Fetch repairs
+   useEffect(() => {
+@@ -44,6 +45,11 @@ export default function App() {
+     setLoading(false);
+   };
+ 
++  const viewRepair = (id) => {
++    setSelectedRepairId(id);
++    setCurrentPage("repairDetail");
++  };
++
+   return (
+     <div className="app">
+       <header className="header">
+@@ -83,7 +89,15 @@ export default function App() {
+       <main className="main-content">
+         {currentPage === "home" && <HomePage />}
+         {currentPage === "intake" && <IntakePage />}
+-        {currentPage === "repairs" && <RepairsPage repairs={repairs} loading={loading} />}
++        {currentPage === "repairs" && (
++          <RepairsPage repairs={repairs} loading={loading} onView={viewRepair} />
++        )}
++        {currentPage === "repairDetail" && (
++          <RepairDetailPage
++            repairId={selectedRepairId}
++            onBack={() => setCurrentPage("repairs")}
++          />
++        )}
+         {currentPage === "invoices" && <InvoicesPage />}
+       </main>
+     </div>
+@@ -210,7 +224,7 @@ function IntakePage() {
+   );
+ }
+ 
+-function RepairsPage({ repairs, loading }) {
++function RepairsPage({ repairs, loading, onView }) {
+   if (loading) return <div className="page"><p>Loading...</p></div>;
+ 
+   return (
+@@ -233,12 +247,12 @@ function RepairsPage({ repairs, loading }) {
+           <tbody>
+             {repairs.map(repair => (
+               <tr key={repair.id}>
+-                <td>{repair.id}</td>
++                <td>{repair.notion_repair_number ?? repair.id}</td>
+                 <td>{repair.customer_name || "N/A"}</td>
+                 <td>{repair.instrument_name || "N/A"}</td>
+                 <td><span className="status-badge">{repair.status}</span></td>
+-                <td>{new Date(repair.intake_date).toLocaleDateString()}</td>
+-                <td><button className="btn-small">View</button></td>
++                <td>{repair.intake_date ? new Date(repair.intake_date).toLocaleDateString() : "--"}</td>
++                <td><button className="btn-small" onClick={() => onView(repair.id)}>View</button></td>
+               </tr>
+             ))}
+           </tbody>
+@@ -248,11 +262,176 @@ function RepairsPage({ repairs, loading }) {
+   );
+ }
+ 
++function fmtDate(d) {
++  if (!d) return "--";
++  const date = new Date(d);
++  if (isNaN(date.getTime())) return "--";
++  return date.toLocaleDateString();
++}
++
++function fmtMoney(n) {
++  if (n === null || n === undefined || n === "") return "--";
++  const v = parseFloat(n);
++  return isNaN(v) ? "--" : `$${v.toFixed(2)}`;
++}
++
++function RepairDetailPage({ repairId, onBack }) {
++  const [repair, setRepair] = useState(null);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++  const [creatingInvoice, setCreatingInvoice] = useState(false);
++
++  useEffect(() => {
++    let cancelled = false;
++    setLoading(true);
++    setError(null);
++    axios
++      .get(`${API_URL}/api/repairs/${repairId}`)
++      .then((res) => {
++        if (!cancelled) setRepair(res.data);
++      })
++      .catch((err) => {
++        console.error("Error fetching repair:", err);
++        if (!cancelled) setError("Could not load this repair.");
++      })
++      .finally(() => {
++        if (!cancelled) setLoading(false);
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [repairId]);
++
++  const handleCreateInvoice = async () => {
++    setCreatingInvoice(true);
++    try {
++      const res = await axios.post(`${API_URL}/api/invoices`, {
++        repair_id: repairId,
++        name: repair?.title ? `Invoice for ${repair.title}` : undefined,
++      });
++      window.open(`${API_URL}/api/invoices/${res.data.id}/pdf`, "_blank");
++    } catch (err) {
++      console.error("Error creating invoice:", err);
++      alert("Could not create invoice.");
++    }
++    setCreatingInvoice(false);
++  };
++
++  if (loading) return <div className="page"><p>Loading...</p></div>;
++  if (error || !repair) return (
++    <section className="page">
++      <button className="btn-small" onClick={onBack}>&larr; Back to Repairs</button>
++      <p>{error || "Repair not found."}</p>
++    </section>
++  );
++
++  return (
++    <section className="page">
++      <button className="btn-small" onClick={onBack}>&larr; Back to Repairs</button>
++      <h2>Repair Ticket #{repair.notion_repair_number ?? repair.id}</h2>
++
++      <div className="dashboard-grid">
++        <div className="card">
++          <h3>Details</h3>
++          <p><strong>Status:</strong> {repair.status}</p>
++          <p><strong>Customer:</strong> {repair.customer_name || "N/A"}</p>
++          <p><strong>Instrument:</strong> {repair.instrument_name || "N/A"}</p>
++          <p><strong>Technician:</strong> {repair.technician_name || "N/A"}</p>
++          <p><strong>Intake Date:</strong> {fmtDate(repair.intake_date)}</p>
++          <p><strong>Estimated Completion:</strong> {fmtDate(repair.estimated_completion)}</p>
++          <p><strong>Estimated Cost:</strong> {fmtMoney(repair.estimated_repair_cost)}</p>
++        </div>
++        <div className="card">
++          <h3>Billing</h3>
++          <p><strong>Labor Cost:</strong> {fmtMoney(repair.laborCost)}</p>
++          <p><strong>Parts Cost:</strong> {fmtMoney(repair.partsCost)}</p>
++          <p><strong>Subtotal:</strong> {fmtMoney(repair.subtotal)}</p>
++        </div>
++      </div>
++
++      <div className="form-group" style={{ marginTop: "1.5rem" }}>
++        <a
++          className="btn-primary"
++          href={`${API_URL}/api/repairs/${repairId}/receipt.pdf`}
++          target="_blank"
++          rel="noopener noreferrer"
++          style={{ marginRight: "0.75rem", display: "inline-block", textDecoration: "none" }}
++        >
++          Print Receipt
++        </a>
++        <button className="btn-primary" onClick={handleCreateInvoice} disabled={creatingInvoice}>
++          {creatingInvoice ? "Creating..." : "Create Invoice"}
++        </button>
++      </div>
++    </section>
++  );
++}
++
+ function InvoicesPage() {
++  const [invoices, setInvoices] = useState([]);
++  const [loading, setLoading] = useState(true);
++
++  useEffect(() => {
++    let cancelled = false;
++    setLoading(true);
++    axios
++      .get(`${API_URL}/api/invoices`)
++      .then((res) => {
++        if (!cancelled) setInvoices(res.data);
++      })
++      .catch((err) => console.error("Error fetching invoices:", err))
++      .finally(() => {
++        if (!cancelled) setLoading(false);
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, []);
++
++  if (loading) return <div className="page"><p>Loading...</p></div>;
++
+   return (
+     <section className="page">
+       <h2>Invoices</h2>
+-      <p>Invoice management coming soon.</p>
++      {invoices.length === 0 ? (
++        <p>No invoices yet. Create one from a repair's detail page.</p>
++      ) : (
++        <table className="table">
++          <thead>
++            <tr>
++              <th>Invoice #</th>
++              <th>Repair</th>
++              <th>Customer</th>
++              <th>Invoice Date</th>
++              <th>Due Date</th>
++              <th>Status</th>
++              <th>Actions</th>
++            </tr>
++          </thead>
++          <tbody>
++            {invoices.map((inv) => (
++              <tr key={inv.id}>
++                <td>{inv.notion_invoice_number ?? inv.id}</td>
++                <td>{inv.repair_title || `Repair #${inv.notion_repair_number ?? inv.repair_id}`}</td>
++                <td>{inv.customer_name || "N/A"}</td>
++                <td>{fmtDate(inv.invoice_date)}</td>
++                <td>{fmtDate(inv.due_date)}</td>
++                <td><span className="status-badge">{inv.payment_status || "Unpaid"}</span></td>
++                <td>
++                  <a
++                    className="btn-small"
++                    href={`${API_URL}/api/invoices/${inv.id}/pdf`}
++                    target="_blank"
++                    rel="noopener noreferrer"
++                  >
++                    View PDF
++                  </a>
++                </td>
++              </tr>
++            ))}
++          </tbody>
++        </table>
++      )}
+     </section>
+   );
+ }

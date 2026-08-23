@@ -14,6 +14,7 @@ export default function App() {
   const [repairs, setRepairs] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [selectedRepairId, setSelectedRepairId] = useState(null);
 
   // Fetch repairs
   useEffect(() => {
@@ -42,6 +43,11 @@ export default function App() {
       console.error("Error fetching customers:", err);
     }
     setLoading(false);
+  };
+
+  const viewRepair = (id) => {
+    setSelectedRepairId(id);
+    setCurrentPage("repairDetail");
   };
 
   return (
@@ -83,7 +89,15 @@ export default function App() {
       <main className="main-content">
         {currentPage === "home" && <HomePage />}
         {currentPage === "intake" && <IntakePage />}
-        {currentPage === "repairs" && <RepairsPage repairs={repairs} loading={loading} />}
+        {currentPage === "repairs" && (
+          <RepairsPage repairs={repairs} loading={loading} onView={viewRepair} />
+        )}
+        {currentPage === "repairDetail" && (
+          <RepairDetailPage
+            repairId={selectedRepairId}
+            onBack={() => setCurrentPage("repairs")}
+          />
+        )}
         {currentPage === "invoices" && <InvoicesPage />}
       </main>
     </div>
@@ -210,7 +224,7 @@ function IntakePage() {
   );
 }
 
-function RepairsPage({ repairs, loading }) {
+function RepairsPage({ repairs, loading, onView }) {
   if (loading) return <div className="page"><p>Loading...</p></div>;
 
   return (
@@ -233,12 +247,12 @@ function RepairsPage({ repairs, loading }) {
           <tbody>
             {repairs.map(repair => (
               <tr key={repair.id}>
-                <td>{repair.id}</td>
+                <td>{repair.notion_repair_number ?? repair.id}</td>
                 <td>{repair.customer_name || "N/A"}</td>
                 <td>{repair.instrument_name || "N/A"}</td>
                 <td><span className="status-badge">{repair.status}</span></td>
-                <td>{new Date(repair.intake_date).toLocaleDateString()}</td>
-                <td><button className="btn-small">View</button></td>
+                <td>{repair.intake_date ? new Date(repair.intake_date).toLocaleDateString() : "--"}</td>
+                <td><button className="btn-small" onClick={() => onView(repair.id)}>View</button></td>
               </tr>
             ))}
           </tbody>
@@ -248,11 +262,176 @@ function RepairsPage({ repairs, loading }) {
   );
 }
 
+function fmtDate(d) {
+  if (!d) return "--";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return "--";
+  return date.toLocaleDateString();
+}
+
+function fmtMoney(n) {
+  if (n === null || n === undefined || n === "") return "--";
+  const v = parseFloat(n);
+  return isNaN(v) ? "--" : `$${v.toFixed(2)}`;
+}
+
+function RepairDetailPage({ repairId, onBack }) {
+  const [repair, setRepair] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    axios
+      .get(`${API_URL}/api/repairs/${repairId}`)
+      .then((res) => {
+        if (!cancelled) setRepair(res.data);
+      })
+      .catch((err) => {
+        console.error("Error fetching repair:", err);
+        if (!cancelled) setError("Could not load this repair.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repairId]);
+
+  const handleCreateInvoice = async () => {
+    setCreatingInvoice(true);
+    try {
+      const res = await axios.post(`${API_URL}/api/invoices`, {
+        repair_id: repairId,
+        name: repair?.title ? `Invoice for ${repair.title}` : undefined,
+      });
+      window.open(`${API_URL}/api/invoices/${res.data.id}/pdf`, "_blank");
+    } catch (err) {
+      console.error("Error creating invoice:", err);
+      alert("Could not create invoice.");
+    }
+    setCreatingInvoice(false);
+  };
+
+  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (error || !repair) return (
+    <section className="page">
+      <button className="btn-small" onClick={onBack}>&larr; Back to Repairs</button>
+      <p>{error || "Repair not found."}</p>
+    </section>
+  );
+
+  return (
+    <section className="page">
+      <button className="btn-small" onClick={onBack}>&larr; Back to Repairs</button>
+      <h2>Repair Ticket #{repair.notion_repair_number ?? repair.id}</h2>
+
+      <div className="dashboard-grid">
+        <div className="card">
+          <h3>Details</h3>
+          <p><strong>Status:</strong> {repair.status}</p>
+          <p><strong>Customer:</strong> {repair.customer_name || "N/A"}</p>
+          <p><strong>Instrument:</strong> {repair.instrument_name || "N/A"}</p>
+          <p><strong>Technician:</strong> {repair.technician_name || "N/A"}</p>
+          <p><strong>Intake Date:</strong> {fmtDate(repair.intake_date)}</p>
+          <p><strong>Estimated Completion:</strong> {fmtDate(repair.estimated_completion)}</p>
+          <p><strong>Estimated Cost:</strong> {fmtMoney(repair.estimated_repair_cost)}</p>
+        </div>
+        <div className="card">
+          <h3>Billing</h3>
+          <p><strong>Labor Cost:</strong> {fmtMoney(repair.laborCost)}</p>
+          <p><strong>Parts Cost:</strong> {fmtMoney(repair.partsCost)}</p>
+          <p><strong>Subtotal:</strong> {fmtMoney(repair.subtotal)}</p>
+        </div>
+      </div>
+
+      <div className="form-group" style={{ marginTop: "1.5rem" }}>
+        <a
+          className="btn-primary"
+          href={`${API_URL}/api/repairs/${repairId}/receipt.pdf`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ marginRight: "0.75rem", display: "inline-block", textDecoration: "none" }}
+        >
+          Print Receipt
+        </a>
+        <button className="btn-primary" onClick={handleCreateInvoice} disabled={creatingInvoice}>
+          {creatingInvoice ? "Creating..." : "Create Invoice"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function InvoicesPage() {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    axios
+      .get(`${API_URL}/api/invoices`)
+      .then((res) => {
+        if (!cancelled) setInvoices(res.data);
+      })
+      .catch((err) => console.error("Error fetching invoices:", err))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return <div className="page"><p>Loading...</p></div>;
+
   return (
     <section className="page">
       <h2>Invoices</h2>
-      <p>Invoice management coming soon.</p>
+      {invoices.length === 0 ? (
+        <p>No invoices yet. Create one from a repair's detail page.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Invoice #</th>
+              <th>Repair</th>
+              <th>Customer</th>
+              <th>Invoice Date</th>
+              <th>Due Date</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoices.map((inv) => (
+              <tr key={inv.id}>
+                <td>{inv.notion_invoice_number ?? inv.id}</td>
+                <td>{inv.repair_title || `Repair #${inv.notion_repair_number ?? inv.repair_id}`}</td>
+                <td>{inv.customer_name || "N/A"}</td>
+                <td>{fmtDate(inv.invoice_date)}</td>
+                <td>{fmtDate(inv.due_date)}</td>
+                <td><span className="status-badge">{inv.payment_status || "Unpaid"}</span></td>
+                <td>
+                  <a
+                    className="btn-small"
+                    href={`${API_URL}/api/invoices/${inv.id}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    View PDF
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

@@ -4,6 +4,10 @@ import dotenv from "dotenv";
 import mysql from "mysql2/promise";
 import path from "path";
 import { fileURLToPath } from "url";
+import PDFDocument from "pdfkit";
+import { getRepairBillingDetails } from "./services/billing.js";
+import { renderReceiptPdf } from "./pdf/receiptPdf.js";
+import { renderInvoicePdf } from "./pdf/invoicePdf.js";
 
 dotenv.config();
 
@@ -60,11 +64,11 @@ app.get("/api/customers", async (req, res) => {
 
 app.post("/api/customers", async (req, res) => {
   try {
-    const { name, email, phone, address } = req.body;
+    const { name, email, phone, address_line1, address_line2, city, state, zip, notes } = req.body;
     const conn = await pool.getConnection();
     const [result] = await conn.query(
-      "INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?)",
-      [name, email, phone, address]
+      "INSERT INTO customers (name, email, phone, address_line1, address_line2, city, state, zip, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [name, email, phone, address_line1, address_line2, city, state, zip, notes]
     );
     conn.release();
     res.json({ id: result.insertId, ...req.body });
@@ -89,11 +93,11 @@ app.get("/api/repairs", async (req, res) => {
 
 app.post("/api/repairs", async (req, res) => {
   try {
-    const { customer_id, instrument_id, issue_description, estimated_cost } = req.body;
+    const { customer_id, instrument_id, technician_id, title, estimated_repair_cost, estimated_completion } = req.body;
     const conn = await pool.getConnection();
     const [result] = await conn.query(
-      "INSERT INTO repairs (customer_id, instrument_id, issue_description, estimated_cost, status, intake_date) VALUES (?, ?, ?, ?, ?, NOW())",
-      [customer_id, instrument_id, issue_description, estimated_cost, "Received"]
+      "INSERT INTO repairs (customer_id, instrument_id, technician_id, title, estimated_repair_cost, estimated_completion, status, intake_date) VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE())",
+      [customer_id, instrument_id, technician_id || null, title, estimated_repair_cost || null, estimated_completion || null, "Received"]
     );
     conn.release();
     res.json({ id: result.insertId, ...req.body });
@@ -102,16 +106,129 @@ app.post("/api/repairs", async (req, res) => {
   }
 });
 
+// Single repair, with customer/instrument/technician joined in -- used by the
+// repair detail view and as the basis for the receipt PDF.
+app.get("/api/repairs/:id", async (req, res) => {
+  try {
+    const details = await getRepairBillingDetails(pool, req.params.id);
+    if (!details) return res.status(404).json({ error: "Repair not found" });
+    res.json({
+      ...details.repair,
+      laborCost: details.laborCost,
+      partsCost: details.partsCost,
+      subtotal: details.subtotal,
+      workLog: details.workLogRows,
+      partsUsed: details.partsRows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// "Repair Estimate & Receipt" PDF -- the intake-time document.
+app.get("/api/repairs/:id/receipt.pdf", async (req, res) => {
+  try {
+    const details = await getRepairBillingDetails(pool, req.params.id);
+    if (!details) return res.status(404).json({ error: "Repair not found" });
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="receipt-${details.repair.notion_repair_number ?? details.repair.id}.pdf"`
+    );
+    doc.pipe(res);
+    renderReceiptPdf(doc, details.repair);
+    doc.end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Invoices
-app.get("/api/invoices/:repair_id", async (req, res) => {
+app.get("/api/invoices", async (req, res) => {
   try {
     const conn = await pool.getConnection();
     const [rows] = await conn.query(
-      "SELECT * FROM invoices WHERE repair_id = ?",
-      [req.params.repair_id]
+      `SELECT inv.*, r.title AS repair_title, r.notion_repair_number, r.status AS repair_status,
+              c.name AS customer_name
+       FROM invoices inv
+       LEFT JOIN repairs r ON inv.repair_id = r.id
+       LEFT JOIN customers c ON r.customer_id = c.id
+       ORDER BY inv.invoice_date DESC, inv.id DESC`
     );
     conn.release();
-    res.json(rows[0] || null);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/invoices/:id", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query("SELECT * FROM invoices WHERE id = ?", [req.params.id]);
+    conn.release();
+    if (!rows[0]) return res.status(404).json({ error: "Invoice not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create an invoice for a repair. due_date/tax_rate/payment_status are
+// optional -- payment_status defaults to Unpaid.
+app.post("/api/invoices", async (req, res) => {
+  try {
+    const { repair_id, name, due_date, tax_rate, payment_status } = req.body;
+    if (!repair_id) return res.status(400).json({ error: "repair_id is required" });
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      "INSERT INTO invoices (name, repair_id, invoice_date, due_date, payment_status, tax_rate) VALUES (?, ?, CURDATE(), ?, ?, ?)",
+      [name || null, repair_id, due_date || null, payment_status || "Unpaid", tax_rate || null]
+    );
+    conn.release();
+    res.json({ id: result.insertId, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Itemized invoice PDF.
+app.get("/api/invoices/:id/pdf", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [invRows] = await conn.query("SELECT * FROM invoices WHERE id = ?", [req.params.id]);
+    conn.release();
+    const invoice = invRows[0];
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+
+    const details = await getRepairBillingDetails(pool, invoice.repair_id);
+    if (!details) return res.status(404).json({ error: "Repair for this invoice not found" });
+
+    const taxRate = parseFloat(invoice.tax_rate) || 0;
+    const tax = details.subtotal * taxRate;
+    const total = details.subtotal + tax;
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="invoice-${invoice.notion_invoice_number ?? invoice.id}.pdf"`
+    );
+    doc.pipe(res);
+    renderInvoicePdf(doc, {
+      invoice,
+      repair: details.repair,
+      workLogRows: details.workLogRows,
+      partsRows: details.partsRows,
+      laborCost: details.laborCost,
+      partsCost: details.partsCost,
+      subtotal: details.subtotal,
+      tax,
+      total,
+    });
+    doc.end();
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
