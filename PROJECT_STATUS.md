@@ -37,9 +37,12 @@ any committed file.
   (needs `migrate-parts-integer-columns.sql` run against the live DB
   first, same pattern as the AUTO_INCREMENT migration), sortable
   columns, positive-only reorder field validation, markup shown as a
-  percentage, and All Repairs (renamed from Active Repairs, now
-  filterable + sortable). Deliberately holding off on redeploying until
-  the next planned Portainer update session.
+  percentage, All Repairs (renamed from Active Repairs, now filterable +
+  sortable), filters added to Inventory/Invoices, and two new pages
+  (Customers, Instruments) with edit forms and their own
+  `GET`/`PUT /api/customers/:id` and `GET`/`PUT /api/instruments/:id`
+  routes. Deliberately holding off on redeploying until the next planned
+  Portainer update session.
 - MariaDB running in its own container (`lcc-mariadb`) with a named volume
   (`lcc_mariadb_data`) for persistence. The AUTO_INCREMENT schema migration
   has been applied to the live database (see `applied patches/`).
@@ -92,12 +95,12 @@ Source files:
 ## Backend API (backend/server.js)
 
 - `GET /api/health`
-- `GET /api/customers`, `POST /api/customers`
+- `GET /api/customers`, `POST /api/customers`, `GET /api/customers/:id`, `PUT /api/customers/:id`
 - `GET /api/repairs`, `POST /api/repairs`, `GET /api/repairs/:id`
 - `GET /api/repairs/:id/receipt.pdf` — "Repair Estimate & Receipt" PDF
 - `GET /api/invoices`, `POST /api/invoices`, `GET /api/invoices/:id`
 - `GET /api/invoices/:id/pdf` — itemized invoice PDF (labor + parts + tax)
-- `GET /api/instruments` — shop-wide, joined with owner name
+- `GET /api/instruments` (shop-wide, joined with owner name), `GET /api/instruments/:id`, `PUT /api/instruments/:id` (owner is settable/unsettable via `ownerCustomerId`)
 - `GET /api/vendors`, `GET /api/parts`, `GET /api/parts/:id` — parts inventory, joined with vendor name
 - `POST /api/parts` — create a part (and its vendor too, if new)
 - `PUT /api/parts/:id` — update every field on an existing part (replaces quantity_in_stock, unlike /receive)
@@ -141,13 +144,20 @@ regardless of status by default; filterable by status and free-text search
 across customer/instrument/title; sortable columns; clicking the ticket
 number opens the repair detail page), Repair Detail (shows
 status/customer/instrument/billing, links to Print Receipt and Create
-Invoice), Invoices (real data, links to each invoice's PDF), Inventory
-(parts list with sortable columns, a "Low Stock" flag when
-quantity_in_stock <= reorder_level, markup shown as a percentage, and a
-"Receive Parts" form -- pick an existing part to add received quantity to
-its stock, or "+ New Part" to create one, with a "+ New Vendor" fallback if
-the vendor isn't in the system yet either; clicking a part name opens an
-edit page for its full record).
+Invoice), Invoices (sortable columns; filterable by payment status and
+free-text search across customer/repair; links to each invoice's PDF),
+Inventory (sortable columns; filterable by category, vendor, and free-text
+search; a "Low Stock" flag when quantity_in_stock <= reorder_level; markup
+shown as a percentage; a "Receive Parts" form -- pick an existing part to
+add received quantity to its stock, or "+ New Part" to create one, with a
+"+ New Vendor" fallback if the vendor isn't in the system yet either;
+clicking a part name opens an edit page for its full record), Customers
+(sortable columns; free-text search across name/email/phone; clicking a
+name opens an edit page for the full record via
+`GET`/`PUT /api/customers/:id`), Instruments (sortable columns; filterable
+by owner (including "No Owner") and free-text search across
+name/type/make/model/serial; clicking a name opens an edit page, including
+reassigning the owner, via `GET`/`PUT /api/instruments/:id`).
 
 The footer also shows the running build's version + short git commit hash
 (`__APP_VERSION__` / `__COMMIT_HASH__`, both Vite `define`s computed in
@@ -195,16 +205,13 @@ is actually deployed.
 2. **Repair status updates.** Status is set to "Received" at intake and
    never changes through the app (Diagnosis → In Progress → Ready for
    Pickup → Complete all require a direct DB edit today).
-3. **Customer list/management page.** No way to browse, search, or edit
-   existing customers outside of the intake picker;
-   `fetchCustomers` in `App.jsx` exists but nothing calls it besides the
-   intake form's picker. Should follow the standard list-page pattern
-   (see "Frontend" above) once built.
-4. Lower priority: deleting parts/vendors/customers/repairs (nothing in
-   the app deletes anything today -- editing exists for parts, not yet
-   for the others), a live dashboard (currently static), auth (currently
-   none — fine for LAN-only use, worth a conscious decision before any
-   external exposure).
+3. Lower priority: deleting parts/vendors/customers/instruments/repairs
+   (nothing in the app deletes anything today -- editing exists for
+   parts/customers/instruments, not yet for vendors/repairs/invoices), a
+   live dashboard (currently static), a Technicians/Vendors management
+   page (both have DB tables and are referenced elsewhere but have no
+   page of their own yet), auth (currently none — fine for LAN-only use,
+   worth a conscious decision before any external exposure).
 
 Done: PDF receipts/invoices, AUTO_INCREMENT schema fix (applied to live
 DB), New Repair Intake wired to the backend with repeat-customer and
@@ -222,7 +229,11 @@ percentage in the UI while still stored as a cost multiplier in the DB
 sortable-list pattern extracted into shared `useSort`/`sortRows`/
 `SortableHeaderRow` helpers and applied to both Inventory and the
 renamed/filterable All Repairs page -- this is now the standard for any
-new list page (see "Frontend" section above).
+new list page (see "Frontend" section above), filters added to Invoices
+(payment status + search) and Inventory (category + vendor + search),
+and two new pages built to the same standard: Customers (list + edit,
+`GET`/`PUT /api/customers/:id`) and Instruments (list + edit including
+reassigning the owner, `GET`/`PUT /api/instruments/:id`).
 
 ## Recommended way of working on this project going forward
 

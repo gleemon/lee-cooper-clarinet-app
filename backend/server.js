@@ -77,6 +77,46 @@ app.post("/api/customers", async (req, res) => {
   }
 });
 
+// Single customer -- used by the customer edit page.
+app.get("/api/customers/:id", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query("SELECT * FROM customers WHERE id = ?", [req.params.id]);
+    conn.release();
+    if (!rows[0]) return res.status(404).json({ error: "Customer not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an existing customer's record. Used by the customer edit page.
+app.put("/api/customers/:id", async (req, res) => {
+  try {
+    const { name, email, phone, address_line1, address_line2, city, state, zip, notes } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "name is required" });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      `UPDATE customers SET
+         name = ?, email = ?, phone = ?, address_line1 = ?, address_line2 = ?,
+         city = ?, state = ?, zip = ?, notes = ?
+       WHERE id = ?`,
+      [name, email || null, phone || null, address_line1 || null, address_line2 || null, city || null, state || null, zip || null, notes || null, req.params.id]
+    );
+    if (result.affectedRows === 0) {
+      conn.release();
+      return res.status(404).json({ error: "Customer not found" });
+    }
+    const [rows] = await conn.query("SELECT * FROM customers WHERE id = ?", [req.params.id]);
+    conn.release();
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // All instruments in the shop's records, regardless of owner -- used by the
 // intake form's instrument picker. A repair's customer and instrument don't
 // have to match the same person (shop-owned instruments, loaners, repairs
@@ -89,6 +129,65 @@ app.get("/api/instruments", async (req, res) => {
     );
     conn.release();
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Single instrument, joined with owner name -- used by the instrument edit page.
+app.get("/api/instruments/:id", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query(
+      "SELECT i.*, c.name AS owner_name FROM instruments i LEFT JOIN customers c ON i.owner_customer_id = c.id WHERE i.id = ?",
+      [req.params.id]
+    );
+    conn.release();
+    if (!rows[0]) return res.status(404).json({ error: "Instrument not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an existing instrument's record. Used by the instrument edit page.
+// ownerCustomerId may be omitted/empty to unset the owner (e.g. shop-use
+// instruments).
+app.put("/api/instruments/:id", async (req, res) => {
+  try {
+    const { name, type, make, model, serial, purchaseDate, purchaseCost, valuation, ownerCustomerId } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "name is required" });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      `UPDATE instruments SET
+         name = ?, type = ?, make = ?, model = ?, serial = ?,
+         purchase_date = ?, purchase_cost = ?, valuation = ?, owner_customer_id = ?
+       WHERE id = ?`,
+      [
+        name,
+        type || null,
+        make || null,
+        model || null,
+        serial || null,
+        purchaseDate || null,
+        purchaseCost || null,
+        valuation || null,
+        ownerCustomerId || null,
+        req.params.id
+      ]
+    );
+    if (result.affectedRows === 0) {
+      conn.release();
+      return res.status(404).json({ error: "Instrument not found" });
+    }
+    const [rows] = await conn.query(
+      "SELECT i.*, c.name AS owner_name FROM instruments i LEFT JOIN customers c ON i.owner_customer_id = c.id WHERE i.id = ?",
+      [req.params.id]
+    );
+    conn.release();
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

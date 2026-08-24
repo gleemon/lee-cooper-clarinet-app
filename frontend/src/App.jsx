@@ -70,7 +70,6 @@ function SortableHeaderRow({ columns, sortField, sortDirection, onSort }) {
 export default function App() {
   const [currentPage, setCurrentPage] = useState("home");
   const [repairs, setRepairs] = useState([]);
-  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedRepairId, setSelectedRepairId] = useState(null);
 
@@ -88,17 +87,6 @@ export default function App() {
       setRepairs(res.data);
     } catch (err) {
       console.error("Error fetching repairs:", err);
-    }
-    setLoading(false);
-  };
-
-  const fetchCustomers = async () => {
-    setLoading(true);
-    try {
-      const res = await axios.get(`${API_URL}/api/customers`);
-      setCustomers(res.data);
-    } catch (err) {
-      console.error("Error fetching customers:", err);
     }
     setLoading(false);
   };
@@ -148,6 +136,18 @@ export default function App() {
         >
           Inventory
         </button>
+        <button
+          className={`nav-btn ${currentPage === "customers" ? "active" : ""}`}
+          onClick={() => setCurrentPage("customers")}
+        >
+          Customers
+        </button>
+        <button
+          className={`nav-btn ${currentPage === "instruments" ? "active" : ""}`}
+          onClick={() => setCurrentPage("instruments")}
+        >
+          Instruments
+        </button>
       </nav>
 
       <main className="main-content">
@@ -164,6 +164,8 @@ export default function App() {
         )}
         {currentPage === "invoices" && <InvoicesPage />}
         {currentPage === "inventory" && <InventoryPage />}
+        {currentPage === "customers" && <CustomersPage />}
+        {currentPage === "instruments" && <InstrumentsPage />}
       </main>
 
       <footer className="footer">
@@ -680,9 +682,23 @@ function RepairDetailPage({ repairId, onBack }) {
   );
 }
 
+const INVOICE_PAYMENT_STATUSES = ["Unpaid", "Paid", "Overdue"];
+
+const INVOICE_COLUMNS = [
+  { key: "invoiceNumber", label: "Invoice #", type: "number" },
+  { key: "repair_title", label: "Repair", type: "string" },
+  { key: "customer_name", label: "Customer", type: "string" },
+  { key: "invoice_date", label: "Invoice Date", type: "date" },
+  { key: "due_date", label: "Due Date", type: "date" },
+  { key: "payment_status", label: "Status", type: "string" }
+];
+
 function InvoicesPage() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { sortField, sortDirection, handleSort } = useSort("invoice_date", "desc");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -703,34 +719,74 @@ function InvoicesPage() {
 
   if (loading) return <div className="page"><p>Loading...</p></div>;
 
+  const withInvoiceNumber = invoices.map((inv) => ({
+    ...inv,
+    invoiceNumber: inv.notion_invoice_number ?? inv.id
+  }));
+
+  const filtered = withInvoiceNumber.filter((inv) => {
+    const status = inv.payment_status || "Unpaid";
+    if (statusFilter && status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const haystack = `${inv.customer_name || ""} ${inv.repair_title || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sorted = sortRows(filtered, INVOICE_COLUMNS, sortField, sortDirection);
+
   return (
     <section className="page">
       <h2>Invoices</h2>
+
+      <div className="filter-bar">
+        <div className="form-group">
+          <label>Status</label>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="">All Statuses</option>
+            {INVOICE_PAYMENT_STATUSES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Search</label>
+          <input
+            type="text"
+            placeholder="Customer or repair..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
       {invoices.length === 0 ? (
         <p>No invoices yet. Create one from a repair's detail page.</p>
+      ) : sorted.length === 0 ? (
+        <p>No invoices match this filter.</p>
       ) : (
         <table className="table">
           <thead>
-            <tr>
-              <th>Invoice #</th>
-              <th>Repair</th>
-              <th>Customer</th>
-              <th>Invoice Date</th>
-              <th>Due Date</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
+            <SortableHeaderRow
+              columns={INVOICE_COLUMNS}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
           </thead>
           <tbody>
-            {invoices.map((inv) => (
+            {sorted.map((inv) => (
               <tr key={inv.id}>
-                <td>{inv.notion_invoice_number ?? inv.id}</td>
+                <td>{inv.invoiceNumber}</td>
                 <td>{inv.repair_title || `Repair #${inv.notion_repair_number ?? inv.repair_id}`}</td>
                 <td>{inv.customer_name || "N/A"}</td>
                 <td>{fmtDate(inv.invoice_date)}</td>
                 <td>{fmtDate(inv.due_date)}</td>
-                <td><span className="status-badge">{inv.payment_status || "Unpaid"}</span></td>
                 <td>
+                  <span className="status-badge">{inv.payment_status || "Unpaid"}</span>
+                  {" "}
                   <a
                     className="btn-small"
                     href={`${API_URL}/api/invoices/${inv.id}/pdf`}
@@ -766,7 +822,24 @@ function InventoryPage() {
   const [showForm, setShowForm] = useState(false);
   const [viewingPartId, setViewingPartId] = useState(null);
   const { sortField, sortDirection, handleSort } = useSort("part_name");
-  const sortedParts = sortRows(parts, INVENTORY_COLUMNS, sortField, sortDirection);
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [vendorFilter, setVendorFilter] = useState("");
+  const [search, setSearch] = useState("");
+
+  const categories = [...new Set(parts.map((p) => p.category).filter(Boolean))].sort();
+
+  const filteredParts = parts.filter((p) => {
+    if (categoryFilter && p.category !== categoryFilter) return false;
+    if (vendorFilter && String(p.vendor_id) !== vendorFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const haystack = `${p.part_name || ""} ${p.description || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sortedParts = sortRows(filteredParts, INVENTORY_COLUMNS, sortField, sortDirection);
 
   const fetchParts = () => {
     setLoading(true);
@@ -823,10 +896,44 @@ function InventoryPage() {
         />
       )}
 
+      {parts.length > 0 && (
+        <div className="filter-bar">
+          <div className="form-group">
+            <label>Category</label>
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="">All Categories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Vendor</label>
+            <select value={vendorFilter} onChange={(e) => setVendorFilter(e.target.value)}>
+              <option value="">All Vendors</option>
+              {vendors.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Search</label>
+            <input
+              type="text"
+              placeholder="Part name or description..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <p>Loading...</p>
       ) : parts.length === 0 ? (
         <p>No parts in inventory yet.</p>
+      ) : sortedParts.length === 0 ? (
+        <p>No parts match this filter.</p>
       ) : (
         <table className="table">
           <thead>
@@ -1158,6 +1265,538 @@ function PartEditPage({ partId, vendors, onBack, onSaved }) {
         <div className="form-group">
           <label>Markup (%)</label>
           <input type="number" name="markup" value={formData.markup} onChange={handleChange} step="0.01" placeholder="e.g. 20 for 20%" />
+        </div>
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? "Saving..." : "Save Changes"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+const CUSTOMER_COLUMNS = [
+  { key: "name", label: "Name", type: "string" },
+  { key: "email", label: "Email", type: "string" },
+  { key: "phone", label: "Phone", type: "string" },
+  { key: "city", label: "City", type: "string" },
+  { key: "state", label: "State", type: "string" }
+];
+
+function CustomersPage() {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [viewingCustomerId, setViewingCustomerId] = useState(null);
+  const { sortField, sortDirection, handleSort } = useSort("name");
+  const [search, setSearch] = useState("");
+
+  const fetchCustomers = () => {
+    setLoading(true);
+    axios
+      .get(`${API_URL}/api/customers`)
+      .then((res) => setCustomers(res.data))
+      .catch((err) => console.error("Error fetching customers:", err))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
+
+  if (viewingCustomerId) {
+    return (
+      <CustomerEditPage
+        customerId={viewingCustomerId}
+        onBack={() => setViewingCustomerId(null)}
+        onSaved={() => {
+          setViewingCustomerId(null);
+          fetchCustomers();
+        }}
+      />
+    );
+  }
+
+  const filtered = customers.filter((c) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const haystack = `${c.name || ""} ${c.email || ""} ${c.phone || ""}`.toLowerCase();
+    return haystack.includes(q);
+  });
+
+  const sorted = sortRows(filtered, CUSTOMER_COLUMNS, sortField, sortDirection);
+
+  return (
+    <section className="page">
+      <h2>Customers</h2>
+
+      {customers.length > 0 && (
+        <div className="filter-bar">
+          <div className="form-group">
+            <label>Search</label>
+            <input
+              type="text"
+              placeholder="Name, email, or phone..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <p>Loading...</p>
+      ) : customers.length === 0 ? (
+        <p>No customers yet.</p>
+      ) : sorted.length === 0 ? (
+        <p>No customers match this filter.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <SortableHeaderRow
+              columns={CUSTOMER_COLUMNS}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
+          </thead>
+          <tbody>
+            {sorted.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <button className="link-btn" onClick={() => setViewingCustomerId(c.id)}>
+                    {c.name}
+                  </button>
+                </td>
+                <td>{c.email || "--"}</td>
+                <td>{c.phone || "--"}</td>
+                <td>{c.city || "--"}</td>
+                <td>{c.state || "--"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+function CustomerEditPage({ customerId, onBack, onSaved }) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    address_line1: "",
+    address_line2: "",
+    city: "",
+    state: "",
+    zip: "",
+    notes: ""
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    axios
+      .get(`${API_URL}/api/customers/${customerId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const c = res.data;
+        setFormData({
+          name: c.name || "",
+          email: c.email || "",
+          phone: c.phone || "",
+          address_line1: c.address_line1 || "",
+          address_line2: c.address_line2 || "",
+          city: c.city || "",
+          state: c.state || "",
+          zip: c.zip || "",
+          notes: c.notes || ""
+        });
+      })
+      .catch((err) => {
+        console.error("Error fetching customer:", err);
+        if (!cancelled) setLoadError("Could not load this customer.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.put(`${API_URL}/api/customers/${customerId}`, formData);
+      onSaved();
+    } catch (err) {
+      console.error("Error saving customer:", err);
+      setError(err.response?.data?.error || "Could not save. Please try again.");
+    }
+    setSubmitting(false);
+  };
+
+  if (loading) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Customers</button>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Customers</button>
+        <p>{loadError}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="page">
+      <button className="btn-small" onClick={onBack} style={{ marginBottom: "1.5rem" }}>&larr; Back to Customers</button>
+      <h2>Edit Customer</h2>
+      {error && <p className="form-error">{error}</p>}
+      <form onSubmit={handleSubmit} className="form">
+        <div className="form-group">
+          <label>Name *</label>
+          <input type="text" name="name" value={formData.name} onChange={handleChange} required />
+        </div>
+        <div className="form-group">
+          <label>Email</label>
+          <input type="email" name="email" value={formData.email} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Phone</label>
+          <input type="tel" name="phone" value={formData.phone} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Address Line 1</label>
+          <input type="text" name="address_line1" value={formData.address_line1} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Address Line 2</label>
+          <input type="text" name="address_line2" value={formData.address_line2} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>City</label>
+          <input type="text" name="city" value={formData.city} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>State</label>
+          <input type="text" name="state" value={formData.state} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Zip</label>
+          <input type="text" name="zip" value={formData.zip} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Notes</label>
+          <textarea name="notes" value={formData.notes} onChange={handleChange} rows="3"></textarea>
+        </div>
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? "Saving..." : "Save Changes"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+const INSTRUMENT_COLUMNS = [
+  { key: "name", label: "Name", type: "string" },
+  { key: "type", label: "Type", type: "string" },
+  { key: "make", label: "Make", type: "string" },
+  { key: "model", label: "Model", type: "string" },
+  { key: "serial", label: "Serial", type: "string" },
+  { key: "owner_name", label: "Owner", type: "string" }
+];
+
+function toDateInputValue(d) {
+  if (!d) return "";
+  return String(d).slice(0, 10);
+}
+
+function InstrumentsPage() {
+  const [instruments, setInstruments] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [viewingInstrumentId, setViewingInstrumentId] = useState(null);
+  const { sortField, sortDirection, handleSort } = useSort("name");
+  const [ownerFilter, setOwnerFilter] = useState("");
+  const [search, setSearch] = useState("");
+
+  const fetchInstruments = () => {
+    setLoading(true);
+    axios
+      .get(`${API_URL}/api/instruments`)
+      .then((res) => setInstruments(res.data))
+      .catch((err) => console.error("Error fetching instruments:", err))
+      .finally(() => setLoading(false));
+  };
+
+  const fetchCustomers = () => {
+    axios
+      .get(`${API_URL}/api/customers`)
+      .then((res) => setCustomers(res.data))
+      .catch((err) => console.error("Error fetching customers:", err));
+  };
+
+  useEffect(() => {
+    fetchInstruments();
+    fetchCustomers();
+  }, []);
+
+  if (viewingInstrumentId) {
+    return (
+      <InstrumentEditPage
+        instrumentId={viewingInstrumentId}
+        customers={customers}
+        onBack={() => setViewingInstrumentId(null)}
+        onSaved={() => {
+          setViewingInstrumentId(null);
+          fetchInstruments();
+          fetchCustomers();
+        }}
+      />
+    );
+  }
+
+  const filtered = instruments.filter((i) => {
+    if (ownerFilter === "none" && i.owner_customer_id) return false;
+    if (ownerFilter && ownerFilter !== "none" && String(i.owner_customer_id) !== ownerFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const haystack = `${i.name || ""} ${i.type || ""} ${i.make || ""} ${i.model || ""} ${i.serial || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sorted = sortRows(filtered, INSTRUMENT_COLUMNS, sortField, sortDirection);
+
+  return (
+    <section className="page">
+      <h2>Instruments</h2>
+
+      {instruments.length > 0 && (
+        <div className="filter-bar">
+          <div className="form-group">
+            <label>Owner</label>
+            <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}>
+              <option value="">All Owners</option>
+              <option value="none">No Owner</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Search</label>
+            <input
+              type="text"
+              placeholder="Name, type, make, model, or serial..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <p>Loading...</p>
+      ) : instruments.length === 0 ? (
+        <p>No instruments yet.</p>
+      ) : sorted.length === 0 ? (
+        <p>No instruments match this filter.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <SortableHeaderRow
+              columns={INSTRUMENT_COLUMNS}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
+          </thead>
+          <tbody>
+            {sorted.map((i) => (
+              <tr key={i.id}>
+                <td>
+                  <button className="link-btn" onClick={() => setViewingInstrumentId(i.id)}>
+                    {i.name}
+                  </button>
+                </td>
+                <td>{i.type || "--"}</td>
+                <td>{i.make || "--"}</td>
+                <td>{i.model || "--"}</td>
+                <td>{i.serial || "--"}</td>
+                <td>{i.owner_name || "--"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+function InstrumentEditPage({ instrumentId, customers, onBack, onSaved }) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [ownerCustomerId, setOwnerCustomerId] = useState("");
+  const [formData, setFormData] = useState({
+    name: "",
+    type: "",
+    make: "",
+    model: "",
+    serial: "",
+    purchaseDate: "",
+    purchaseCost: "",
+    valuation: ""
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    axios
+      .get(`${API_URL}/api/instruments/${instrumentId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const i = res.data;
+        setOwnerCustomerId(i.owner_customer_id ? String(i.owner_customer_id) : "");
+        setFormData({
+          name: i.name || "",
+          type: i.type || "",
+          make: i.make || "",
+          model: i.model || "",
+          serial: i.serial || "",
+          purchaseDate: toDateInputValue(i.purchase_date),
+          purchaseCost: i.purchase_cost ?? "",
+          valuation: i.valuation ?? ""
+        });
+      })
+      .catch((err) => {
+        console.error("Error fetching instrument:", err);
+        if (!cancelled) setLoadError("Could not load this instrument.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [instrumentId]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.put(`${API_URL}/api/instruments/${instrumentId}`, {
+        name: formData.name,
+        type: formData.type,
+        make: formData.make,
+        model: formData.model,
+        serial: formData.serial,
+        purchaseDate: formData.purchaseDate,
+        purchaseCost: formData.purchaseCost,
+        valuation: formData.valuation,
+        ownerCustomerId
+      });
+      onSaved();
+    } catch (err) {
+      console.error("Error saving instrument:", err);
+      setError(err.response?.data?.error || "Could not save. Please try again.");
+    }
+    setSubmitting(false);
+  };
+
+  if (loading) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Instruments</button>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Instruments</button>
+        <p>{loadError}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="page">
+      <button className="btn-small" onClick={onBack} style={{ marginBottom: "1.5rem" }}>&larr; Back to Instruments</button>
+      <h2>Edit Instrument</h2>
+      {error && <p className="form-error">{error}</p>}
+      <form onSubmit={handleSubmit} className="form">
+        <div className="form-group">
+          <label>Name *</label>
+          <input type="text" name="name" value={formData.name} onChange={handleChange} required />
+        </div>
+        <div className="form-group">
+          <label>Type</label>
+          <input type="text" name="type" value={formData.type} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Make</label>
+          <input type="text" name="make" value={formData.make} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Model</label>
+          <input type="text" name="model" value={formData.model} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Serial Number</label>
+          <input type="text" name="serial" value={formData.serial} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Owner</label>
+          <select value={ownerCustomerId} onChange={(e) => setOwnerCustomerId(e.target.value)}>
+            <option value="">No Owner</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Purchase Date</label>
+          <input type="date" name="purchaseDate" value={formData.purchaseDate} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Purchase Cost</label>
+          <input type="number" name="purchaseCost" value={formData.purchaseCost} onChange={handleChange} step="0.01" min="0" />
+        </div>
+        <div className="form-group">
+          <label>Valuation</label>
+          <input type="number" name="valuation" value={formData.valuation} onChange={handleChange} step="0.01" min="0" />
         </div>
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? "Saving..." : "Save Changes"}
