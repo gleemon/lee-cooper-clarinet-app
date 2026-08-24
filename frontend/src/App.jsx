@@ -137,30 +137,32 @@ function IntakePage({ onCreated }) {
     customerEmail: "",
     customerPhone: "",
     instrumentType: "",
+    instrumentMake: "",
+    instrumentModel: "",
+    instrumentSerial: "",
+    instrumentPurchaseDate: "",
+    instrumentPurchaseCost: "",
+    instrumentValuation: "",
     issueDescription: "",
     estimatedCost: ""
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
+  // Customers and instruments are both shop-wide lists -- a repair's
+  // customer and instrument don't have to match the same owner (shop-owned
+  // instruments, loaners, drop-offs by a family member), so instrument
+  // lookup isn't scoped to whichever customer is selected.
   useEffect(() => {
     axios
       .get(`${API_URL}/api/customers`)
       .then((res) => setCustomers(res.data))
       .catch((err) => console.error("Error fetching customers:", err));
-  }, []);
-
-  useEffect(() => {
-    setInstrumentId("");
-    if (!customerId) {
-      setInstruments([]);
-      return;
-    }
     axios
-      .get(`${API_URL}/api/customers/${customerId}/instruments`)
+      .get(`${API_URL}/api/instruments`)
       .then((res) => setInstruments(res.data))
       .catch((err) => console.error("Error fetching instruments:", err));
-  }, [customerId]);
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -182,7 +184,17 @@ function IntakePage({ onCreated }) {
               customerEmail: formData.customerEmail,
               customerPhone: formData.customerPhone
             }),
-        ...(instrumentId ? { instrumentId } : { instrumentType: formData.instrumentType })
+        ...(instrumentId
+          ? { instrumentId }
+          : {
+              instrumentType: formData.instrumentType,
+              instrumentMake: formData.instrumentMake,
+              instrumentModel: formData.instrumentModel,
+              instrumentSerial: formData.instrumentSerial,
+              instrumentPurchaseDate: formData.instrumentPurchaseDate,
+              instrumentPurchaseCost: formData.instrumentPurchaseCost,
+              instrumentValuation: formData.instrumentValuation
+            })
       };
       const res = await axios.post(`${API_URL}/api/repairs/intake`, payload);
       setFormData({
@@ -190,6 +202,12 @@ function IntakePage({ onCreated }) {
         customerEmail: "",
         customerPhone: "",
         instrumentType: "",
+        instrumentMake: "",
+        instrumentModel: "",
+        instrumentSerial: "",
+        instrumentPurchaseDate: "",
+        instrumentPurchaseCost: "",
+        instrumentValuation: "",
         issueDescription: "",
         estimatedCost: ""
       });
@@ -251,36 +269,92 @@ function IntakePage({ onCreated }) {
           </>
         )}
 
-        {customerId && (
-          <div className="form-group">
-            <label>Instrument</label>
-            <select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
-              <option value="">+ New Instrument</option>
-              {instruments.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}{i.type ? ` (${i.type})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="form-group">
+          <label>Instrument</label>
+          <select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
+            <option value="">+ New Instrument</option>
+            {instruments.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.name}{i.type ? ` (${i.type})` : ""} — {i.owner_name || "No owner"}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {!instrumentId && (
-          <div className="form-group">
-            <label>Instrument Type *</label>
-            <select
-              name="instrumentType"
-              value={formData.instrumentType}
-              onChange={handleChange}
-              required
-            >
-              <option value="">Select...</option>
-              <option value="Bb Clarinet">Bb Clarinet</option>
-              <option value="A Clarinet">A Clarinet</option>
-              <option value="Bass Clarinet">Bass Clarinet</option>
-              <option value="Alto Clarinet">Alto Clarinet</option>
-            </select>
-          </div>
+          <>
+            <div className="form-group">
+              <label>Instrument Type *</label>
+              <select
+                name="instrumentType"
+                value={formData.instrumentType}
+                onChange={handleChange}
+                required
+              >
+                <option value="">Select...</option>
+                <option value="Bb Clarinet">Bb Clarinet</option>
+                <option value="A Clarinet">A Clarinet</option>
+                <option value="Bass Clarinet">Bass Clarinet</option>
+                <option value="Alto Clarinet">Alto Clarinet</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Make</label>
+              <input
+                type="text"
+                name="instrumentMake"
+                value={formData.instrumentMake}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="form-group">
+              <label>Model</label>
+              <input
+                type="text"
+                name="instrumentModel"
+                value={formData.instrumentModel}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="form-group">
+              <label>Serial Number</label>
+              <input
+                type="text"
+                name="instrumentSerial"
+                value={formData.instrumentSerial}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="form-group">
+              <label>Purchase Date</label>
+              <input
+                type="date"
+                name="instrumentPurchaseDate"
+                value={formData.instrumentPurchaseDate}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="form-group">
+              <label>Purchase Cost</label>
+              <input
+                type="number"
+                name="instrumentPurchaseCost"
+                value={formData.instrumentPurchaseCost}
+                onChange={handleChange}
+                step="0.01"
+              />
+            </div>
+            <div className="form-group">
+              <label>Valuation</label>
+              <input
+                type="number"
+                name="instrumentValuation"
+                value={formData.instrumentValuation}
+                onChange={handleChange}
+                step="0.01"
+              />
+            </div>
+          </>
         )}
 
         <div className="form-group">

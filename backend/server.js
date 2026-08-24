@@ -77,15 +77,15 @@ app.post("/api/customers", async (req, res) => {
   }
 });
 
-// Instruments owned by a given customer -- used by the intake form's
-// instrument picker so repeat customers don't get a duplicate instrument
-// record every visit.
-app.get("/api/customers/:id/instruments", async (req, res) => {
+// All instruments in the shop's records, regardless of owner -- used by the
+// intake form's instrument picker. A repair's customer and instrument don't
+// have to match the same person (shop-owned instruments, loaners, repairs
+// dropped off by a family member), so this isn't scoped to one customer.
+app.get("/api/instruments", async (req, res) => {
   try {
     const conn = await pool.getConnection();
     const [rows] = await conn.query(
-      "SELECT * FROM instruments WHERE owner_customer_id = ? ORDER BY name ASC",
-      [req.params.id]
+      "SELECT i.*, c.name AS owner_name FROM instruments i LEFT JOIN customers c ON i.owner_customer_id = c.id ORDER BY i.name ASC"
     );
     conn.release();
     res.json(rows);
@@ -136,6 +136,12 @@ app.post("/api/repairs/intake", async (req, res) => {
     customerPhone,
     instrumentId,
     instrumentType,
+    instrumentMake,
+    instrumentModel,
+    instrumentSerial,
+    instrumentPurchaseDate,
+    instrumentPurchaseCost,
+    instrumentValuation,
     issueDescription,
     estimatedCost
   } = req.body;
@@ -165,9 +171,22 @@ app.post("/api/repairs/intake", async (req, res) => {
 
     let resolvedInstrumentId = instrumentId;
     if (!resolvedInstrumentId) {
+      const instrumentName = instrumentMake || instrumentModel
+        ? [instrumentMake, instrumentModel].filter(Boolean).join(" ")
+        : instrumentType;
       const [instrumentResult] = await conn.query(
-        "INSERT INTO instruments (name, type, owner_customer_id) VALUES (?, ?, ?)",
-        [instrumentType, instrumentType, resolvedCustomerId]
+        "INSERT INTO instruments (name, type, make, model, serial, purchase_date, purchase_cost, valuation, owner_customer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          instrumentName,
+          instrumentType,
+          instrumentMake || null,
+          instrumentModel || null,
+          instrumentSerial || null,
+          instrumentPurchaseDate || null,
+          instrumentPurchaseCost || null,
+          instrumentValuation || null,
+          resolvedCustomerId
+        ]
       );
       resolvedInstrumentId = instrumentResult.insertId;
     }

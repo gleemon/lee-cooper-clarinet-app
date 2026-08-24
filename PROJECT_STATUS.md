@@ -90,11 +90,13 @@ receipt template.
 ## Frontend (frontend/src/App.jsx)
 
 Pages: Dashboard (mostly a stub), New Repair Intake (wired to
-`POST /api/repairs/intake`; has a customer picker — selecting an existing
-customer loads their instruments into a second picker via
-`GET /api/customers/:id/instruments`, so repeat visits don't create
-duplicate customer/instrument rows — falls back to "+ New Customer" /
-"+ New Instrument" text fields otherwise), Active Repairs (real data,
+`POST /api/repairs/intake`; has independent customer and instrument
+pickers, both shop-wide via `GET /api/customers` and `GET /api/instruments`
+— a repair's customer and instrument don't have to share an owner, so
+instrument lookup isn't scoped to the selected customer. Each falls back to
+"+ New Customer" / "+ New Instrument" fields; new-instrument creation now
+captures make/model/serial/purchase date/purchase cost/valuation, not just
+type), Active Repairs (real data,
 "View" opens a repair detail page), Repair Detail (shows
 status/customer/instrument/billing, links to Print Receipt and Create
 Invoice), Invoices (real data, links to each invoice's PDF).
