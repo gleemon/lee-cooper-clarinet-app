@@ -144,3 +144,6 @@ vite.config.ts.timestamp-*
 
 # macOS
 .DS_Store
+
+# Local Docker Compose overrides (e.g. port remapping to dodge AirPlay on 5000)
+docker-compose.override.yml

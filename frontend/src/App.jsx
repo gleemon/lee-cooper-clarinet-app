@@ -162,7 +162,7 @@ export default function App() {
             onBack={() => setCurrentPage("repairs")}
           />
         )}
-        {currentPage === "invoices" && <InvoicesPage />}
+        {currentPage === "invoices" && <InvoicesPage onViewRepair={viewRepair} />}
         {currentPage === "inventory" && <InventoryPage />}
         {currentPage === "customers" && <CustomersPage />}
         {currentPage === "instruments" && <InstrumentsPage />}
@@ -693,7 +693,7 @@ const INVOICE_COLUMNS = [
   { key: "payment_status", label: "Status", type: "string" }
 ];
 
-function InvoicesPage() {
+function InvoicesPage({ onViewRepair }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const { sortField, sortDirection, handleSort } = useSort("invoice_date", "desc");
@@ -780,7 +780,11 @@ function InvoicesPage() {
             {sorted.map((inv) => (
               <tr key={inv.id}>
                 <td>{inv.invoiceNumber}</td>
-                <td>{inv.repair_title || `Repair #${inv.notion_repair_number ?? inv.repair_id}`}</td>
+                <td>
+                  <button className="link-btn" onClick={() => onViewRepair(inv.repair_id)}>
+                    {inv.repair_title || `Repair #${inv.notion_repair_number ?? inv.repair_id}`}
+                  </button>
+                </td>
                 <td>{inv.customer_name || "N/A"}</td>
                 <td>{fmtDate(inv.invoice_date)}</td>
                 <td>{fmtDate(inv.due_date)}</td>
