@@ -89,11 +89,20 @@ receipt template.
 
 ## Frontend (frontend/src/App.jsx)
 
-Pages: Dashboard (mostly a stub), New Repair Intake (form exists but is
-**not yet wired to the backend** — currently just logs to console/alert),
-Active Repairs (real data, "View" opens a repair detail page), Repair
-Detail (shows status/customer/instrument/billing, links to Print Receipt
-and Create Invoice), Invoices (real data, links to each invoice's PDF).
+Pages: Dashboard (mostly a stub), New Repair Intake (wired to
+`POST /api/repairs/intake`; has a customer picker — selecting an existing
+customer loads their instruments into a second picker via
+`GET /api/customers/:id/instruments`, so repeat visits don't create
+duplicate customer/instrument rows — falls back to "+ New Customer" /
+"+ New Instrument" text fields otherwise), Active Repairs (real data,
+"View" opens a repair detail page), Repair Detail (shows
+status/customer/instrument/billing, links to Print Receipt and Create
+Invoice), Invoices (real data, links to each invoice's PDF).
+
+The footer also shows the running build's version + short git commit hash
+(`__APP_VERSION__` / `__COMMIT_HASH__`, both Vite `define`s computed in
+`frontend/vite.config.js`), so it's obvious from the live site which commit
+is actually deployed.
 
 ## Known issues, gotchas, and their fixes
 
@@ -118,21 +127,32 @@ and Create Invoice), Invoices (real data, links to each invoice's PDF).
 
 ## Immediate next steps (in order)
 
-1. **Apply the PDF feature patch** (`pdf-receipts-invoices.patch`,
-   delivered separately) to the local repo clone: `git apply
-   pdf-receipts-invoices.patch`, review, commit, push.
-2. **Before redeploying**, run `migrate-auto-increment.sql` against the
-   live NUC database — the schema change (AUTO_INCREMENT ids) won't apply
-   itself, since init scripts don't re-run against an existing populated
-   volume. Same pattern as before: scp the file over, then
-   `docker exec -i lcc-mariadb mariadb -u root -p'yourpassword' repair_shop
-   < migrate-auto-increment.sql`.
-3. Redeploy the stack in Portainer (pull + `docker compose up -d --build`,
-   or Portainer's equivalent "pull and redeploy").
-4. Smoke-test on the live site: view a repair, print a receipt, create an
-   invoice, view its PDF.
-5. Wire up the New Repair Intake form to `POST /api/repairs` (currently a
-   stub) — first real gap after PDF receipts/invoices land.
+1. **Confirm live deployment status.** Steps that were pending as of the
+   PDF feature landing: run `migrate-auto-increment.sql` against the live
+   NUC database (via the scp + `docker exec ... mariadb` workaround, since
+   Portainer's bind-mount bug means init scripts won't just re-run), then
+   redeploy the stack in Portainer, then smoke-test live (view a repair,
+   print a receipt, create an invoice, view its PDF). Verify whether this
+   already happened before assuming it hasn't.
+2. **Add labor/parts entry to a repair.** Billing (`backend/services/billing.js`)
+   sums `work_log` and `parts_used` rows, but nothing in the app can create
+   either — there's no endpoint or UI. Every receipt/invoice will total $0
+   until this exists. Needs `POST /api/repairs/:id/work-log`,
+   `POST /api/repairs/:id/parts-used`, and a form on the Repair Detail page.
+3. **Repair status updates.** Status is set to "Received" at intake and
+   never changes through the app (Diagnosis → In Progress → Ready for
+   Pickup → Complete all require a direct DB edit today).
+4. **Customer list/management page.** No way to browse, search, or edit
+   existing customers outside of the intake picker;
+   `fetchCustomers` in `App.jsx` exists but nothing calls it besides the
+   intake form's picker.
+5. Lower priority: parts inventory/vendor management UI, a live dashboard
+   (currently static), auth (currently none — fine for LAN-only use, worth
+   a conscious decision before any external exposure).
+
+Done: PDF receipts/invoices, AUTO_INCREMENT schema fix, New Repair Intake
+wired to the backend with a repeat-customer/instrument picker, footer
+version + commit hash display.
 
 ## Recommended way of working on this project going forward
 

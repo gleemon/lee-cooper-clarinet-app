@@ -77,6 +77,23 @@ app.post("/api/customers", async (req, res) => {
   }
 });
 
+// Instruments owned by a given customer -- used by the intake form's
+// instrument picker so repeat customers don't get a duplicate instrument
+// record every visit.
+app.get("/api/customers/:id/instruments", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query(
+      "SELECT * FROM instruments WHERE owner_customer_id = ? ORDER BY name ASC",
+      [req.params.id]
+    );
+    conn.release();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Repairs (main endpoint)
 app.get("/api/repairs", async (req, res) => {
   try {
@@ -106,48 +123,68 @@ app.post("/api/repairs", async (req, res) => {
   }
 });
 
-// Repair intake: creates the customer, instrument, and repair together in a
-// single transaction. Used by the "New Repair Intake" form, which only
-// collects a new walk-in customer's info -- it has no customer/instrument
-// picker, so it always creates fresh records rather than matching existing
-// ones.
+// Repair intake: creates the repair, and the customer and/or instrument too
+// if they don't already exist, all in a single transaction. Used by the
+// "New Repair Intake" form, which lets the front desk either pick an
+// existing customer/instrument (repeat visits) or fall back to creating
+// new records (first-time walk-ins).
 app.post("/api/repairs/intake", async (req, res) => {
   const {
+    customerId,
     customerName,
     customerEmail,
     customerPhone,
+    instrumentId,
     instrumentType,
     issueDescription,
     estimatedCost
   } = req.body;
 
-  if (!customerName || !instrumentType || !issueDescription) {
-    return res.status(400).json({ error: "customerName, instrumentType, and issueDescription are required" });
+  if (!customerId && !customerName) {
+    return res.status(400).json({ error: "customerId or customerName is required" });
+  }
+  if (!instrumentId && !instrumentType) {
+    return res.status(400).json({ error: "instrumentId or instrumentType is required" });
+  }
+  if (!issueDescription) {
+    return res.status(400).json({ error: "issueDescription is required" });
   }
 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
-    const [customerResult] = await conn.query(
-      "INSERT INTO customers (name, email, phone) VALUES (?, ?, ?)",
-      [customerName, customerEmail || null, customerPhone || null]
-    );
-    const customerId = customerResult.insertId;
+    let resolvedCustomerId = customerId;
+    if (!resolvedCustomerId) {
+      const [customerResult] = await conn.query(
+        "INSERT INTO customers (name, email, phone) VALUES (?, ?, ?)",
+        [customerName, customerEmail || null, customerPhone || null]
+      );
+      resolvedCustomerId = customerResult.insertId;
+    }
 
-    const [instrumentResult] = await conn.query(
-      "INSERT INTO instruments (name, type, owner_customer_id) VALUES (?, ?, ?)",
-      [instrumentType, instrumentType, customerId]
+    let resolvedInstrumentId = instrumentId;
+    if (!resolvedInstrumentId) {
+      const [instrumentResult] = await conn.query(
+        "INSERT INTO instruments (name, type, owner_customer_id) VALUES (?, ?, ?)",
+        [instrumentType, instrumentType, resolvedCustomerId]
+      );
+      resolvedInstrumentId = instrumentResult.insertId;
+    }
+
+    const [instrumentRows] = await conn.query(
+      "SELECT name FROM instruments WHERE id = ?",
+      [resolvedInstrumentId]
     );
-    const instrumentId = instrumentResult.insertId;
+    const instrumentName = instrumentRows[0]?.name || "Instrument";
 
     const [repairResult] = await conn.query(
       "INSERT INTO repairs (customer_id, instrument_id, title, notes, estimated_repair_cost, status, intake_date) VALUES (?, ?, ?, ?, ?, ?, CURDATE())",
-      [customerId, instrumentId, `${instrumentType} Repair`, issueDescription, estimatedCost || null, "Received"]
+      [resolvedCustomerId, resolvedInstrumentId, `${instrumentName} Repair`, issueDescription, estimatedCost || null, "Received"]
     );
 
     await conn.commit();
-    res.json({ id: repairResult.insertId, customer_id: customerId, instrument_id: instrumentId });
+    res.json({ id: repairResult.insertId, customer_id: resolvedCustomerId, instrument_id: resolvedInstrumentId });
   } catch (err) {
     await conn.rollback();
     res.status(500).json({ error: err.message });

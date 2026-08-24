@@ -102,7 +102,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        <p>v{__APP_VERSION__}</p>
+        <p>v{__APP_VERSION__} ({__COMMIT_HASH__})</p>
       </footer>
     </div>
   );
@@ -127,6 +127,11 @@ function HomePage() {
 }
 
 function IntakePage({ onCreated }) {
+  const [customers, setCustomers] = useState([]);
+  const [customerId, setCustomerId] = useState(""); // "" = new customer
+  const [instruments, setInstruments] = useState([]);
+  const [instrumentId, setInstrumentId] = useState(""); // "" = new instrument
+
   const [formData, setFormData] = useState({
     customerName: "",
     customerEmail: "",
@@ -138,6 +143,25 @@ function IntakePage({ onCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
+  useEffect(() => {
+    axios
+      .get(`${API_URL}/api/customers`)
+      .then((res) => setCustomers(res.data))
+      .catch((err) => console.error("Error fetching customers:", err));
+  }, []);
+
+  useEffect(() => {
+    setInstrumentId("");
+    if (!customerId) {
+      setInstruments([]);
+      return;
+    }
+    axios
+      .get(`${API_URL}/api/customers/${customerId}/instruments`)
+      .then((res) => setInstruments(res.data))
+      .catch((err) => console.error("Error fetching instruments:", err));
+  }, [customerId]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -148,7 +172,19 @@ function IntakePage({ onCreated }) {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await axios.post(`${API_URL}/api/repairs/intake`, formData);
+      const payload = {
+        issueDescription: formData.issueDescription,
+        estimatedCost: formData.estimatedCost,
+        ...(customerId
+          ? { customerId }
+          : {
+              customerName: formData.customerName,
+              customerEmail: formData.customerEmail,
+              customerPhone: formData.customerPhone
+            }),
+        ...(instrumentId ? { instrumentId } : { instrumentType: formData.instrumentType })
+      };
+      const res = await axios.post(`${API_URL}/api/repairs/intake`, payload);
       setFormData({
         customerName: "",
         customerEmail: "",
@@ -157,6 +193,8 @@ function IntakePage({ onCreated }) {
         issueDescription: "",
         estimatedCost: ""
       });
+      setCustomerId("");
+      setInstrumentId("");
       onCreated(res.data.id);
     } catch (err) {
       console.error("Error creating repair intake:", err);
@@ -171,52 +209,84 @@ function IntakePage({ onCreated }) {
       {error && <p className="form-error">{error}</p>}
       <form onSubmit={handleSubmit} className="form">
         <div className="form-group">
-          <label>Customer Name *</label>
-          <input 
-            type="text" 
-            name="customerName" 
-            value={formData.customerName}
-            onChange={handleChange}
-            required 
-          />
-        </div>
-        <div className="form-group">
-          <label>Email</label>
-          <input 
-            type="email" 
-            name="customerEmail" 
-            value={formData.customerEmail}
-            onChange={handleChange}
-          />
-        </div>
-        <div className="form-group">
-          <label>Phone</label>
-          <input 
-            type="tel" 
-            name="customerPhone" 
-            value={formData.customerPhone}
-            onChange={handleChange}
-          />
-        </div>
-        <div className="form-group">
-          <label>Instrument Type *</label>
-          <select 
-            name="instrumentType" 
-            value={formData.instrumentType}
-            onChange={handleChange}
-            required
-          >
-            <option value="">Select...</option>
-            <option value="Bb Clarinet">Bb Clarinet</option>
-            <option value="A Clarinet">A Clarinet</option>
-            <option value="Bass Clarinet">Bass Clarinet</option>
-            <option value="Alto Clarinet">Alto Clarinet</option>
+          <label>Customer</label>
+          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+            <option value="">+ New Customer</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
           </select>
         </div>
+
+        {!customerId && (
+          <>
+            <div className="form-group">
+              <label>Customer Name *</label>
+              <input
+                type="text"
+                name="customerName"
+                value={formData.customerName}
+                onChange={handleChange}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label>Email</label>
+              <input
+                type="email"
+                name="customerEmail"
+                value={formData.customerEmail}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="form-group">
+              <label>Phone</label>
+              <input
+                type="tel"
+                name="customerPhone"
+                value={formData.customerPhone}
+                onChange={handleChange}
+              />
+            </div>
+          </>
+        )}
+
+        {customerId && (
+          <div className="form-group">
+            <label>Instrument</label>
+            <select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
+              <option value="">+ New Instrument</option>
+              {instruments.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}{i.type ? ` (${i.type})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {!instrumentId && (
+          <div className="form-group">
+            <label>Instrument Type *</label>
+            <select
+              name="instrumentType"
+              value={formData.instrumentType}
+              onChange={handleChange}
+              required
+            >
+              <option value="">Select...</option>
+              <option value="Bb Clarinet">Bb Clarinet</option>
+              <option value="A Clarinet">A Clarinet</option>
+              <option value="Bass Clarinet">Bass Clarinet</option>
+              <option value="Alto Clarinet">Alto Clarinet</option>
+            </select>
+          </div>
+        )}
+
         <div className="form-group">
           <label>Issue Description *</label>
-          <textarea 
-            name="issueDescription" 
+          <textarea
+            name="issueDescription"
             value={formData.issueDescription}
             onChange={handleChange}
             rows="4"
@@ -225,9 +295,9 @@ function IntakePage({ onCreated }) {
         </div>
         <div className="form-group">
           <label>Estimated Cost</label>
-          <input 
-            type="number" 
-            name="estimatedCost" 
+          <input
+            type="number"
+            name="estimatedCost"
             value={formData.estimatedCost}
             onChange={handleChange}
             step="0.01"

@@ -1,9 +1,11 @@
 # Stage 1: Build frontend
 FROM node:18-alpine AS frontend-builder
+RUN apk add --no-cache git
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ ./
+COPY .git /app/.git
 RUN npm run build
 
 # Stage 2: Build backend + serve
