@@ -36,9 +36,10 @@ any committed file.
   clickable part-name edit page, integer quantity/reorder columns
   (needs `migrate-parts-integer-columns.sql` run against the live DB
   first, same pattern as the AUTO_INCREMENT migration), sortable
-  columns, positive-only reorder field validation, and markup shown as
-  a percentage. Deliberately holding off on redeploying until the next
-  planned Portainer update session.
+  columns, positive-only reorder field validation, markup shown as a
+  percentage, and All Repairs (renamed from Active Repairs, now
+  filterable + sortable). Deliberately holding off on redeploying until
+  the next planned Portainer update session.
 - MariaDB running in its own container (`lcc-mariadb`) with a named volume
   (`lcc_mariadb_data`) for persistence. The AUTO_INCREMENT schema migration
   has been applied to the live database (see `applied patches/`).
@@ -114,6 +115,20 @@ receipt template.
 
 ## Frontend (frontend/src/App.jsx)
 
+**Standard pattern for any new list page**: sortable column headers (click
+to sort ascending, click again for descending, with a ▲/▼ indicator) and a
+clickable primary field (styled as a link via the `.link-btn` CSS class)
+that opens the row's detail/edit view, instead of a separate "Actions"
+column with a "View"/"Edit" button. Shared implementation so this doesn't
+get reimplemented per page: `useSort(initialField, initialDirection)` hook,
+`sortRows(rows, columns, sortField, sortDirection)`, and the
+`<SortableHeaderRow columns={...} .../>` component, all defined near the
+top of `App.jsx`. A page just defines its own `{key, label, type}` column
+config (`type` is `"string"`, `"number"`, or `"date"`) -- see
+`INVENTORY_COLUMNS` / `REPAIR_COLUMNS` for examples. Filtering (a status
+`<select>`, a free-text search `<input>`, both wrapped in a `.filter-bar`
+div) is layered on top where it makes sense, applied before sorting.
+
 Pages: Dashboard (mostly a stub), New Repair Intake (wired to
 `POST /api/repairs/intake`; has independent customer and instrument
 pickers, both shop-wide via `GET /api/customers` and `GET /api/instruments`
@@ -121,14 +136,18 @@ pickers, both shop-wide via `GET /api/customers` and `GET /api/instruments`
 instrument lookup isn't scoped to the selected customer. Each falls back to
 "+ New Customer" / "+ New Instrument" fields; new-instrument creation now
 captures make/model/serial/purchase date/purchase cost/valuation, not just
-type), Active Repairs (real data,
-"View" opens a repair detail page), Repair Detail (shows
+type), All Repairs (renamed from "Active Repairs" -- shows every repair
+regardless of status by default; filterable by status and free-text search
+across customer/instrument/title; sortable columns; clicking the ticket
+number opens the repair detail page), Repair Detail (shows
 status/customer/instrument/billing, links to Print Receipt and Create
 Invoice), Invoices (real data, links to each invoice's PDF), Inventory
-(parts list with a "Low Stock" flag when quantity_in_stock <= reorder_level,
-plus a "Receive Parts" form -- pick an existing part to add received
-quantity to its stock, or "+ New Part" to create one, with a "+ New Vendor"
-fallback if the vendor isn't in the system yet either).
+(parts list with sortable columns, a "Low Stock" flag when
+quantity_in_stock <= reorder_level, markup shown as a percentage, and a
+"Receive Parts" form -- pick an existing part to add received quantity to
+its stock, or "+ New Part" to create one, with a "+ New Vendor" fallback if
+the vendor isn't in the system yet either; clicking a part name opens an
+edit page for its full record).
 
 The footer also shows the running build's version + short git commit hash
 (`__APP_VERSION__` / `__COMMIT_HASH__`, both Vite `define`s computed in
@@ -179,11 +198,13 @@ is actually deployed.
 3. **Customer list/management page.** No way to browse, search, or edit
    existing customers outside of the intake picker;
    `fetchCustomers` in `App.jsx` exists but nothing calls it besides the
-   intake form's picker.
-4. Lower priority: editing/deleting existing parts or vendors (Inventory
-   is currently add-only), a live dashboard (currently static), auth
-   (currently none — fine for LAN-only use, worth a conscious decision
-   before any external exposure).
+   intake form's picker. Should follow the standard list-page pattern
+   (see "Frontend" above) once built.
+4. Lower priority: deleting parts/vendors/customers/repairs (nothing in
+   the app deletes anything today -- editing exists for parts, not yet
+   for the others), a live dashboard (currently static), auth (currently
+   none — fine for LAN-only use, worth a conscious decision before any
+   external exposure).
 
 Done: PDF receipts/invoices, AUTO_INCREMENT schema fix (applied to live
 DB), New Repair Intake wired to the backend with repeat-customer and
@@ -197,7 +218,11 @@ sortable Inventory table column headers, `reorder_level`/`reorder_cost`/
 `reorder_unit` rejected if negative (`quantity_in_stock` is deliberately
 allowed to go negative -- backorders), markup shown/entered as a
 percentage in the UI while still stored as a cost multiplier in the DB
-(`markupPercentToMultiplier`/`markupMultiplierToPercent` in `App.jsx`).
+(`markupPercentToMultiplier`/`markupMultiplierToPercent` in `App.jsx`),
+sortable-list pattern extracted into shared `useSort`/`sortRows`/
+`SortableHeaderRow` helpers and applied to both Inventory and the
+renamed/filterable All Repairs page -- this is now the standard for any
+new list page (see "Frontend" section above).
 
 ## Recommended way of working on this project going forward
 

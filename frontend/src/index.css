@@ -233,6 +233,18 @@ body {
   background-color: #f9f9f9;
 }
 
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+  align-items: flex-end;
+}
+
+.filter-bar .form-group {
+  min-width: 200px;
+}
+
 .sort-header {
   background: none;
   border: none;

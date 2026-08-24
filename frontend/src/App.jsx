@@ -9,6 +9,64 @@ import "./App.css";
 // origin than the backend.
 const API_URL = import.meta.env.VITE_API_URL || "";
 
+// Shared sortable-table pattern: a column config ({key, label, type}) plus
+// this hook/helper/header combo is the standard for any new list page --
+// see InventoryPage and RepairsPage. Clicking a column header sorts by it
+// (asc, then desc on a second click); clicking a row's primary link opens
+// its detail/edit view instead of a separate Actions column.
+function useSort(initialField, initialDirection = "asc") {
+  const [sortField, setSortField] = useState(initialField);
+  const [sortDirection, setSortDirection] = useState(initialDirection);
+
+  const handleSort = (field) => {
+    if (field === sortField) {
+      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  return { sortField, sortDirection, handleSort };
+}
+
+function sortRows(rows, columns, sortField, sortDirection) {
+  const col = columns.find((c) => c.key === sortField);
+  if (!col) return rows;
+  return [...rows].sort((a, b) => {
+    let av = a[sortField];
+    let bv = b[sortField];
+    if (col.type === "number") {
+      av = av == null || av === "" ? -Infinity : parseFloat(av);
+      bv = bv == null || bv === "" ? -Infinity : parseFloat(bv);
+    } else if (col.type === "date") {
+      av = av ? new Date(av).getTime() : -Infinity;
+      bv = bv ? new Date(bv).getTime() : -Infinity;
+    } else {
+      av = (av || "").toString().toLowerCase();
+      bv = (bv || "").toString().toLowerCase();
+    }
+    if (av < bv) return sortDirection === "asc" ? -1 : 1;
+    if (av > bv) return sortDirection === "asc" ? 1 : -1;
+    return 0;
+  });
+}
+
+function SortableHeaderRow({ columns, sortField, sortDirection, onSort }) {
+  return (
+    <tr>
+      {columns.map((col) => (
+        <th key={col.key}>
+          <button className="sort-header" onClick={() => onSort(col.key)}>
+            {col.label}
+            {sortField === col.key && (sortDirection === "asc" ? " ▲" : " ▼")}
+          </button>
+        </th>
+      ))}
+    </tr>
+  );
+}
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState("home");
   const [repairs, setRepairs] = useState([]);
@@ -76,7 +134,7 @@ export default function App() {
           className={`nav-btn ${currentPage === "repairs" ? "active" : ""}`}
           onClick={() => { setCurrentPage("repairs"); fetchRepairs(); }}
         >
-          Active Repairs
+          All Repairs
         </button>
         <button
           className={`nav-btn ${currentPage === "invoices" ? "active" : ""}`}
@@ -126,7 +184,7 @@ function HomePage() {
         </div>
         <div className="card">
           <h3>Recent Repairs</h3>
-          <p>View your active repairs in the "Active Repairs" tab.</p>
+          <p>View and filter every repair in the "All Repairs" tab.</p>
         </div>
       </div>
     </section>
@@ -392,35 +450,102 @@ function IntakePage({ onCreated }) {
   );
 }
 
+// The full set of statuses a repair can have (see docker/init-db/01-schema.sql).
+// Listed explicitly rather than derived from whatever's currently in the
+// data, so the filter always offers every valid status.
+const REPAIR_STATUSES = [
+  "Received",
+  "Diagnosis",
+  "In Progress",
+  "Ready for Pickup",
+  "Parts Ordered",
+  "Complete",
+  "Archive"
+];
+
+const REPAIR_COLUMNS = [
+  { key: "ticketNumber", label: "Ticket #", type: "number" },
+  { key: "customer_name", label: "Customer", type: "string" },
+  { key: "instrument_name", label: "Instrument", type: "string" },
+  { key: "status", label: "Status", type: "string" },
+  { key: "intake_date", label: "Intake Date", type: "date" }
+];
+
 function RepairsPage({ repairs, loading, onView }) {
+  const { sortField, sortDirection, handleSort } = useSort("intake_date", "desc");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [search, setSearch] = useState("");
+
   if (loading) return <div className="page"><p>Loading...</p></div>;
+
+  const withTicketNumber = repairs.map((r) => ({
+    ...r,
+    ticketNumber: r.notion_repair_number ?? r.id
+  }));
+
+  const filtered = withTicketNumber.filter((r) => {
+    if (statusFilter && r.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const haystack = `${r.customer_name || ""} ${r.instrument_name || ""} ${r.title || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sorted = sortRows(filtered, REPAIR_COLUMNS, sortField, sortDirection);
 
   return (
     <section className="page">
-      <h2>Active Repairs</h2>
+      <h2>All Repairs</h2>
+
+      <div className="filter-bar">
+        <div className="form-group">
+          <label>Status</label>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="">All Statuses</option>
+            {REPAIR_STATUSES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Search</label>
+          <input
+            type="text"
+            placeholder="Customer, instrument, or title..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
       {repairs.length === 0 ? (
         <p>No repairs yet.</p>
+      ) : sorted.length === 0 ? (
+        <p>No repairs match this filter.</p>
       ) : (
         <table className="table">
           <thead>
-            <tr>
-              <th>ID</th>
-              <th>Customer</th>
-              <th>Instrument</th>
-              <th>Status</th>
-              <th>Intake Date</th>
-              <th>Actions</th>
-            </tr>
+            <SortableHeaderRow
+              columns={REPAIR_COLUMNS}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
           </thead>
           <tbody>
-            {repairs.map(repair => (
+            {sorted.map((repair) => (
               <tr key={repair.id}>
-                <td>{repair.notion_repair_number ?? repair.id}</td>
+                <td>
+                  <button className="link-btn" onClick={() => onView(repair.id)}>
+                    {repair.ticketNumber}
+                  </button>
+                </td>
                 <td>{repair.customer_name || "N/A"}</td>
                 <td>{repair.instrument_name || "N/A"}</td>
                 <td><span className="status-badge">{repair.status}</span></td>
-                <td>{repair.intake_date ? new Date(repair.intake_date).toLocaleDateString() : "--"}</td>
-                <td><button className="btn-small" onClick={() => onView(repair.id)}>View</button></td>
+                <td>{fmtDate(repair.intake_date)}</td>
               </tr>
             ))}
           </tbody>
@@ -640,33 +765,8 @@ function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [viewingPartId, setViewingPartId] = useState(null);
-  const [sortField, setSortField] = useState("part_name");
-  const [sortDirection, setSortDirection] = useState("asc");
-
-  const handleSort = (field) => {
-    if (field === sortField) {
-      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDirection("asc");
-    }
-  };
-
-  const sortedParts = [...parts].sort((a, b) => {
-    const col = INVENTORY_COLUMNS.find((c) => c.key === sortField);
-    let av = a[sortField];
-    let bv = b[sortField];
-    if (col.type === "number") {
-      av = av == null ? -Infinity : parseFloat(av);
-      bv = bv == null ? -Infinity : parseFloat(bv);
-    } else {
-      av = (av || "").toLowerCase();
-      bv = (bv || "").toLowerCase();
-    }
-    if (av < bv) return sortDirection === "asc" ? -1 : 1;
-    if (av > bv) return sortDirection === "asc" ? 1 : -1;
-    return 0;
-  });
+  const { sortField, sortDirection, handleSort } = useSort("part_name");
+  const sortedParts = sortRows(parts, INVENTORY_COLUMNS, sortField, sortDirection);
 
   const fetchParts = () => {
     setLoading(true);
@@ -730,16 +830,12 @@ function InventoryPage() {
       ) : (
         <table className="table">
           <thead>
-            <tr>
-              {INVENTORY_COLUMNS.map((col) => (
-                <th key={col.key}>
-                  <button className="sort-header" onClick={() => handleSort(col.key)}>
-                    {col.label}
-                    {sortField === col.key && (sortDirection === "asc" ? " ▲" : " ▼")}
-                  </button>
-                </th>
-              ))}
-            </tr>
+            <SortableHeaderRow
+              columns={INVENTORY_COLUMNS}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
           </thead>
           <tbody>
             {sortedParts.map((p) => {
