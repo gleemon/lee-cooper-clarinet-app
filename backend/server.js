@@ -340,6 +340,126 @@ app.get("/api/invoices/:id/pdf", async (req, res) => {
   }
 });
 
+// Parts vendors -- used by the "Receive Parts" form's vendor picker.
+app.get("/api/vendors", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query("SELECT * FROM parts_vendors ORDER BY name ASC");
+    conn.release();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Parts inventory, joined with vendor name.
+app.get("/api/parts", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query(
+      "SELECT p.*, v.name AS vendor_name FROM parts_inventory p LEFT JOIN parts_vendors v ON p.vendor_id = v.id ORDER BY p.part_name ASC"
+    );
+    conn.release();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a new part record (and its vendor too, if it doesn't already
+// exist). Used by the "Receive Parts" form when the part being received
+// isn't in inventory yet.
+app.post("/api/parts", async (req, res) => {
+  const {
+    partName,
+    description,
+    category,
+    quantityInStock,
+    reorderLevel,
+    reorderCost,
+    reorderUnit,
+    reorderUrl,
+    markup,
+    vendorId,
+    vendorName
+  } = req.body;
+
+  if (!partName) {
+    return res.status(400).json({ error: "partName is required" });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    let resolvedVendorId = vendorId || null;
+    if (!resolvedVendorId && vendorName) {
+      const [vendorResult] = await conn.query(
+        "INSERT INTO parts_vendors (name) VALUES (?)",
+        [vendorName]
+      );
+      resolvedVendorId = vendorResult.insertId;
+    }
+
+    const [result] = await conn.query(
+      "INSERT INTO parts_inventory (part_name, description, category, quantity_in_stock, reorder_level, reorder_cost, reorder_unit, reorder_url, markup, vendor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        partName,
+        description || null,
+        category || null,
+        quantityInStock || 0,
+        reorderLevel || null,
+        reorderCost || null,
+        reorderUnit || null,
+        reorderUrl || null,
+        markup || null,
+        resolvedVendorId
+      ]
+    );
+
+    await conn.commit();
+    const [rows] = await conn.query(
+      "SELECT p.*, v.name AS vendor_name FROM parts_inventory p LEFT JOIN parts_vendors v ON p.vendor_id = v.id WHERE p.id = ?",
+      [result.insertId]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// Record a shipment of an existing part arriving -- adds to
+// quantity_in_stock rather than replacing it, so repeated receipts
+// accumulate correctly.
+app.post("/api/parts/:id/receive", async (req, res) => {
+  try {
+    const qty = parseFloat(req.body.quantityReceived);
+    if (!qty || qty <= 0) {
+      return res.status(400).json({ error: "quantityReceived must be a positive number" });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      "UPDATE parts_inventory SET quantity_in_stock = COALESCE(quantity_in_stock, 0) + ? WHERE id = ?",
+      [qty, req.params.id]
+    );
+    if (result.affectedRows === 0) {
+      conn.release();
+      return res.status(404).json({ error: "Part not found" });
+    }
+    const [rows] = await conn.query(
+      "SELECT p.*, v.name AS vendor_name FROM parts_inventory p LEFT JOIN parts_vendors v ON p.vendor_id = v.id WHERE p.id = ?",
+      [req.params.id]
+    );
+    conn.release();
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Hand any other GET request back to the React app (client-side routing fallback)
 app.get(/^\/(?!api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
