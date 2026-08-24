@@ -88,7 +88,7 @@ export default function App() {
 
       <main className="main-content">
         {currentPage === "home" && <HomePage />}
-        {currentPage === "intake" && <IntakePage />}
+        {currentPage === "intake" && <IntakePage onCreated={viewRepair} />}
         {currentPage === "repairs" && (
           <RepairsPage repairs={repairs} loading={loading} onView={viewRepair} />
         )}
@@ -126,7 +126,7 @@ function HomePage() {
   );
 }
 
-function IntakePage() {
+function IntakePage({ onCreated }) {
   const [formData, setFormData] = useState({
     customerName: "",
     customerEmail: "",
@@ -135,29 +135,40 @@ function IntakePage() {
     issueDescription: "",
     estimatedCost: ""
   });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log("Intake form submitted:", formData);
-    alert("Repair intake created! (Backend integration coming)");
-    setFormData({
-      customerName: "",
-      customerEmail: "",
-      customerPhone: "",
-      instrumentType: "",
-      issueDescription: "",
-      estimatedCost: ""
-    });
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await axios.post(`${API_URL}/api/repairs/intake`, formData);
+      setFormData({
+        customerName: "",
+        customerEmail: "",
+        customerPhone: "",
+        instrumentType: "",
+        issueDescription: "",
+        estimatedCost: ""
+      });
+      onCreated(res.data.id);
+    } catch (err) {
+      console.error("Error creating repair intake:", err);
+      setError(err.response?.data?.error || "Could not create repair. Please try again.");
+    }
+    setSubmitting(false);
   };
 
   return (
     <section className="page">
       <h2>New Repair Intake</h2>
+      {error && <p className="form-error">{error}</p>}
       <form onSubmit={handleSubmit} className="form">
         <div className="form-group">
           <label>Customer Name *</label>
@@ -222,7 +233,9 @@ function IntakePage() {
             step="0.01"
           />
         </div>
-        <button type="submit" className="btn-primary">Create Repair & Print Receipt</button>
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? "Creating..." : "Create Repair & Print Receipt"}
+        </button>
       </form>
     </section>
   );

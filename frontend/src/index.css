@@ -131,6 +131,16 @@ body {
   max-width: 600px;
 }
 
+.form-error {
+  color: #c0392b;
+  background-color: #fdecea;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  max-width: 600px;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

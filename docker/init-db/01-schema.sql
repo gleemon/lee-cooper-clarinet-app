@@ -100,6 +100,7 @@ CREATE TABLE repairs (
   estimated_completion DATE,
   completion_date DATE,
   estimated_repair_cost DECIMAL(10,2),
+  notes TEXT,                             -- customer-reported issue description from intake
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
   FOREIGN KEY (instrument_id) REFERENCES instruments(id) ON DELETE SET NULL,
   FOREIGN KEY (technician_id) REFERENCES technicians(id) ON DELETE SET NULL

@@ -106,6 +106,56 @@ app.post("/api/repairs", async (req, res) => {
   }
 });
 
+// Repair intake: creates the customer, instrument, and repair together in a
+// single transaction. Used by the "New Repair Intake" form, which only
+// collects a new walk-in customer's info -- it has no customer/instrument
+// picker, so it always creates fresh records rather than matching existing
+// ones.
+app.post("/api/repairs/intake", async (req, res) => {
+  const {
+    customerName,
+    customerEmail,
+    customerPhone,
+    instrumentType,
+    issueDescription,
+    estimatedCost
+  } = req.body;
+
+  if (!customerName || !instrumentType || !issueDescription) {
+    return res.status(400).json({ error: "customerName, instrumentType, and issueDescription are required" });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [customerResult] = await conn.query(
+      "INSERT INTO customers (name, email, phone) VALUES (?, ?, ?)",
+      [customerName, customerEmail || null, customerPhone || null]
+    );
+    const customerId = customerResult.insertId;
+
+    const [instrumentResult] = await conn.query(
+      "INSERT INTO instruments (name, type, owner_customer_id) VALUES (?, ?, ?)",
+      [instrumentType, instrumentType, customerId]
+    );
+    const instrumentId = instrumentResult.insertId;
+
+    const [repairResult] = await conn.query(
+      "INSERT INTO repairs (customer_id, instrument_id, title, notes, estimated_repair_cost, status, intake_date) VALUES (?, ?, ?, ?, ?, ?, CURDATE())",
+      [customerId, instrumentId, `${instrumentType} Repair`, issueDescription, estimatedCost || null, "Received"]
+    );
+
+    await conn.commit();
+    res.json({ id: repairResult.insertId, customer_id: customerId, instrument_id: instrumentId });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
 // Single repair, with customer/instrument/technician joined in -- used by the
 // repair detail view and as the basis for the receipt PDF.
 app.get("/api/repairs/:id", async (req, res) => {
