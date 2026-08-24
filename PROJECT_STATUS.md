@@ -31,9 +31,14 @@ any committed file.
 
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
-  method). Confirmed live and up to date as of commit `3a2614d`, which
-  includes PDF receipts/invoices, the repeat-customer/shop-wide-instrument
-  intake pickers, and the version/commit footer.
+  method). Confirmed live and up to date as of commit `552ef46` (Parts
+  Inventory tab). **Not yet deployed**: everything after that --
+  clickable part-name edit page, integer quantity/reorder columns
+  (needs `migrate-parts-integer-columns.sql` run against the live DB
+  first, same pattern as the AUTO_INCREMENT migration), sortable
+  columns, positive-only reorder field validation, and markup shown as
+  a percentage. Deliberately holding off on redeploying until the next
+  planned Portainer update session.
 - MariaDB running in its own container (`lcc-mariadb`) with a named volume
   (`lcc_mariadb_data`) for persistence. The AUTO_INCREMENT schema migration
   has been applied to the live database (see `applied patches/`).
@@ -188,7 +193,11 @@ form + click a part name to edit its full record via
 `GET`/`PUT /api/parts/:id`), `quantity_in_stock`/`reorder_level`/
 `reorder_unit` converted from `DECIMAL(10,2)` to `INT` (schema, migration,
 backend rounding, frontend `step`) since parts are counted in whole units,
-live NUC redeployed and confirmed current.
+sortable Inventory table column headers, `reorder_level`/`reorder_cost`/
+`reorder_unit` rejected if negative (`quantity_in_stock` is deliberately
+allowed to go negative -- backorders), markup shown/entered as a
+percentage in the UI while still stored as a cost multiplier in the DB
+(`markupPercentToMultiplier`/`markupMultiplierToPercent` in `App.jsx`).
 
 ## Recommended way of working on this project going forward
 

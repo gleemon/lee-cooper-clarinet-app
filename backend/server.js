@@ -349,6 +349,14 @@ function toIntOrNull(value) {
   return Number.isNaN(n) ? null : n;
 }
 
+// reorder_level, reorder_cost, and reorder_unit must be positive --
+// unlike quantity_in_stock, which is allowed to go negative (backorders).
+function isNegative(value) {
+  if (value === "" || value === null || value === undefined) return false;
+  const n = Number(value);
+  return !Number.isNaN(n) && n < 0;
+}
+
 // Parts vendors -- used by the "Receive Parts" form's vendor picker.
 app.get("/api/vendors", async (req, res) => {
   try {
@@ -411,6 +419,9 @@ app.put("/api/parts/:id", async (req, res) => {
 
   if (!partName) {
     return res.status(400).json({ error: "partName is required" });
+  }
+  if (isNegative(reorderLevel) || isNegative(reorderCost) || isNegative(reorderUnit)) {
+    return res.status(400).json({ error: "reorderLevel, reorderCost, and reorderUnit must be positive" });
   }
 
   const conn = await pool.getConnection();
@@ -486,6 +497,9 @@ app.post("/api/parts", async (req, res) => {
 
   if (!partName) {
     return res.status(400).json({ error: "partName is required" });
+  }
+  if (isNegative(reorderLevel) || isNegative(reorderCost) || isNegative(reorderUnit)) {
+    return res.status(400).json({ error: "reorderLevel, reorderCost, and reorderUnit must be positive" });
   }
 
   const conn = await pool.getConnection();

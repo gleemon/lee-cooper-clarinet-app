@@ -443,6 +443,26 @@ function fmtMoney(n) {
   return isNaN(v) ? "--" : `$${v.toFixed(2)}`;
 }
 
+// markup is stored as a cost multiplier (1.10 = 10% markup) but shown to
+// the user as a percentage.
+function fmtMarkupPercent(multiplier) {
+  if (multiplier === null || multiplier === undefined || multiplier === "") return "--";
+  const v = parseFloat(multiplier);
+  return isNaN(v) ? "--" : `${Math.round((v - 1) * 100)}%`;
+}
+
+function markupMultiplierToPercent(multiplier) {
+  if (multiplier === null || multiplier === undefined || multiplier === "") return "";
+  const v = Number(multiplier);
+  return Number.isNaN(v) ? "" : String(Math.round((v - 1) * 100 * 100) / 100);
+}
+
+function markupPercentToMultiplier(percent) {
+  if (percent === null || percent === undefined || percent === "") return "";
+  const v = Number(percent);
+  return Number.isNaN(v) ? "" : String(1 + v / 100);
+}
+
 function RepairDetailPage({ repairId, onBack }) {
   const [repair, setRepair] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -604,12 +624,49 @@ function InvoicesPage() {
   );
 }
 
+const INVENTORY_COLUMNS = [
+  { key: "part_name", label: "Part", type: "string" },
+  { key: "category", label: "Category", type: "string" },
+  { key: "vendor_name", label: "Vendor", type: "string" },
+  { key: "quantity_in_stock", label: "In Stock", type: "number" },
+  { key: "reorder_level", label: "Reorder Level", type: "number" },
+  { key: "reorder_cost", label: "Reorder Cost", type: "number" },
+  { key: "markup", label: "Markup", type: "number" }
+];
+
 function InventoryPage() {
   const [parts, setParts] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [viewingPartId, setViewingPartId] = useState(null);
+  const [sortField, setSortField] = useState("part_name");
+  const [sortDirection, setSortDirection] = useState("asc");
+
+  const handleSort = (field) => {
+    if (field === sortField) {
+      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedParts = [...parts].sort((a, b) => {
+    const col = INVENTORY_COLUMNS.find((c) => c.key === sortField);
+    let av = a[sortField];
+    let bv = b[sortField];
+    if (col.type === "number") {
+      av = av == null ? -Infinity : parseFloat(av);
+      bv = bv == null ? -Infinity : parseFloat(bv);
+    } else {
+      av = (av || "").toLowerCase();
+      bv = (bv || "").toLowerCase();
+    }
+    if (av < bv) return sortDirection === "asc" ? -1 : 1;
+    if (av > bv) return sortDirection === "asc" ? 1 : -1;
+    return 0;
+  });
 
   const fetchParts = () => {
     setLoading(true);
@@ -674,16 +731,18 @@ function InventoryPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>Part</th>
-              <th>Category</th>
-              <th>Vendor</th>
-              <th>In Stock</th>
-              <th>Reorder Level</th>
-              <th>Reorder Cost</th>
+              {INVENTORY_COLUMNS.map((col) => (
+                <th key={col.key}>
+                  <button className="sort-header" onClick={() => handleSort(col.key)}>
+                    {col.label}
+                    {sortField === col.key && (sortDirection === "asc" ? " ▲" : " ▼")}
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {parts.map((p) => {
+            {sortedParts.map((p) => {
               const inStock = parseFloat(p.quantity_in_stock ?? 0);
               const low = p.reorder_level != null && inStock <= parseFloat(p.reorder_level);
               return (
@@ -701,6 +760,7 @@ function InventoryPage() {
                   </td>
                   <td>{p.reorder_level ?? "--"}</td>
                   <td>{fmtMoney(p.reorder_cost)}</td>
+                  <td>{fmtMarkupPercent(p.markup)}</td>
                 </tr>
               );
             })}
@@ -753,7 +813,7 @@ function ReceivePartsForm({ parts, vendors, onSaved }) {
           reorderCost: formData.reorderCost,
           reorderUnit: formData.reorderUnit,
           reorderUrl: formData.reorderUrl,
-          markup: formData.markup,
+          markup: markupPercentToMultiplier(formData.markup),
           ...(vendorId ? { vendorId } : { vendorName: formData.vendorName })
         });
       }
@@ -811,23 +871,23 @@ function ReceivePartsForm({ parts, vendors, onSaved }) {
           )}
           <div className="form-group">
             <label>Reorder Level</label>
-            <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="1" />
+            <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="1" min="0" />
           </div>
           <div className="form-group">
             <label>Reorder Cost</label>
-            <input type="number" name="reorderCost" value={formData.reorderCost} onChange={handleChange} step="0.01" />
+            <input type="number" name="reorderCost" value={formData.reorderCost} onChange={handleChange} step="0.01" min="0" />
           </div>
           <div className="form-group">
             <label>Reorder Unit (qty per order)</label>
-            <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="1" />
+            <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="1" min="0" />
           </div>
           <div className="form-group">
             <label>Reorder URL</label>
             <input type="text" name="reorderUrl" value={formData.reorderUrl} onChange={handleChange} />
           </div>
           <div className="form-group">
-            <label>Markup (multiplier)</label>
-            <input type="number" name="markup" value={formData.markup} onChange={handleChange} step="0.01" />
+            <label>Markup (%)</label>
+            <input type="number" name="markup" value={formData.markup} onChange={handleChange} step="0.01" placeholder="e.g. 20 for 20%" />
           </div>
         </>
       )}
@@ -883,7 +943,7 @@ function PartEditPage({ partId, vendors, onBack, onSaved }) {
           reorderCost: p.reorder_cost ?? "",
           reorderUnit: p.reorder_unit ?? "",
           reorderUrl: p.reorder_url || "",
-          markup: p.markup ?? ""
+          markup: markupMultiplierToPercent(p.markup)
         });
       })
       .catch((err) => {
@@ -917,7 +977,7 @@ function PartEditPage({ partId, vendors, onBack, onSaved }) {
         reorderCost: formData.reorderCost,
         reorderUnit: formData.reorderUnit,
         reorderUrl: formData.reorderUrl,
-        markup: formData.markup,
+        markup: markupPercentToMultiplier(formData.markup),
         ...(vendorId ? { vendorId } : { vendorName: formData.vendorName })
       });
       onSaved();
@@ -985,23 +1045,23 @@ function PartEditPage({ partId, vendors, onBack, onSaved }) {
         </div>
         <div className="form-group">
           <label>Reorder Level</label>
-          <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="1" />
+          <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="1" min="0" />
         </div>
         <div className="form-group">
           <label>Reorder Cost</label>
-          <input type="number" name="reorderCost" value={formData.reorderCost} onChange={handleChange} step="0.01" />
+          <input type="number" name="reorderCost" value={formData.reorderCost} onChange={handleChange} step="0.01" min="0" />
         </div>
         <div className="form-group">
           <label>Reorder Unit (qty per order)</label>
-          <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="1" />
+          <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="1" min="0" />
         </div>
         <div className="form-group">
           <label>Reorder URL</label>
           <input type="text" name="reorderUrl" value={formData.reorderUrl} onChange={handleChange} />
         </div>
         <div className="form-group">
-          <label>Markup (multiplier)</label>
-          <input type="number" name="markup" value={formData.markup} onChange={handleChange} step="0.01" />
+          <label>Markup (%)</label>
+          <input type="number" name="markup" value={formData.markup} onChange={handleChange} step="0.01" placeholder="e.g. 20 for 20%" />
         </div>
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? "Saving..." : "Save Changes"}
