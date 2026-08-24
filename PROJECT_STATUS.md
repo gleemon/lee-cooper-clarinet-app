@@ -205,7 +205,17 @@ is actually deployed.
 2. **Repair status updates.** Status is set to "Received" at intake and
    never changes through the app (Diagnosis → In Progress → Ready for
    Pickup → Complete all require a direct DB edit today).
-3. Lower priority: deleting parts/vendors/customers/instruments/repairs
+3. **Email customers when a repair is done.** A "Notify Customer" button
+   on the Repair Detail page (next to Print Receipt / Create Invoice),
+   triggered manually rather than automatically on status change, so
+   nothing gets emailed by accident while someone's just editing a
+   ticket. Planned approach: `nodemailer` over SMTP using the shop's
+   existing `leecooperclarinet@gmail.com` (already in seed data) via a
+   Gmail "app password" -- no new service/account needed, fine at this
+   shop's volume. (Tradeoff noted at decision time: a dedicated
+   transactional service like Resend/SendGrid would be more reliable at
+   scale, but Gmail SMTP is the pragmatic starting point here.)
+4. Lower priority: deleting parts/vendors/customers/instruments/repairs
    (nothing in the app deletes anything today -- editing exists for
    parts/customers/instruments, not yet for vendors/repairs/invoices), a
    live dashboard (currently static), a Technicians/Vendors management
