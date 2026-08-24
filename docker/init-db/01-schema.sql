@@ -77,10 +77,10 @@ CREATE TABLE parts_inventory (
   part_name VARCHAR(255) NOT NULL,
   description TEXT,
   category VARCHAR(100),                  -- Pads, Supplies, Cork, Mouthpiece Patch, ...
-  quantity_in_stock DECIMAL(10,2),
-  reorder_level DECIMAL(10,2),
+  quantity_in_stock INT,
+  reorder_level INT,
   reorder_cost DECIMAL(10,2),
-  reorder_unit DECIMAL(10,2),
+  reorder_unit INT,
   reorder_url VARCHAR(500),
   markup DECIMAL(6,2),
   vendor_id INT,

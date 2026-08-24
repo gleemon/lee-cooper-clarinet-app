@@ -811,7 +811,7 @@ function ReceivePartsForm({ parts, vendors, onSaved }) {
           )}
           <div className="form-group">
             <label>Reorder Level</label>
-            <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="0.01" />
+            <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="1" />
           </div>
           <div className="form-group">
             <label>Reorder Cost</label>
@@ -819,7 +819,7 @@ function ReceivePartsForm({ parts, vendors, onSaved }) {
           </div>
           <div className="form-group">
             <label>Reorder Unit (qty per order)</label>
-            <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="0.01" />
+            <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="1" />
           </div>
           <div className="form-group">
             <label>Reorder URL</label>
@@ -834,7 +834,7 @@ function ReceivePartsForm({ parts, vendors, onSaved }) {
 
       <div className="form-group">
         <label>Quantity Received *</label>
-        <input type="number" name="quantity" value={formData.quantity} onChange={handleChange} step="0.01" required />
+        <input type="number" name="quantity" value={formData.quantity} onChange={handleChange} step="1" required />
       </div>
 
       <button type="submit" className="btn-primary" disabled={submitting}>
@@ -981,11 +981,11 @@ function PartEditPage({ partId, vendors, onBack, onSaved }) {
         )}
         <div className="form-group">
           <label>Quantity In Stock</label>
-          <input type="number" name="quantityInStock" value={formData.quantityInStock} onChange={handleChange} step="0.01" />
+          <input type="number" name="quantityInStock" value={formData.quantityInStock} onChange={handleChange} step="1" />
         </div>
         <div className="form-group">
           <label>Reorder Level</label>
-          <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="0.01" />
+          <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="1" />
         </div>
         <div className="form-group">
           <label>Reorder Cost</label>
@@ -993,7 +993,7 @@ function PartEditPage({ partId, vendors, onBack, onSaved }) {
         </div>
         <div className="form-group">
           <label>Reorder Unit (qty per order)</label>
-          <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="0.01" />
+          <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="1" />
         </div>
         <div className="form-group">
           <label>Reorder URL</label>

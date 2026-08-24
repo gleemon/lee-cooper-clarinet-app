@@ -92,8 +92,9 @@ Source files:
 - `GET /api/invoices`, `POST /api/invoices`, `GET /api/invoices/:id`
 - `GET /api/invoices/:id/pdf` — itemized invoice PDF (labor + parts + tax)
 - `GET /api/instruments` — shop-wide, joined with owner name
-- `GET /api/vendors`, `GET /api/parts` — parts inventory, joined with vendor name
+- `GET /api/vendors`, `GET /api/parts`, `GET /api/parts/:id` — parts inventory, joined with vendor name
 - `POST /api/parts` — create a part (and its vendor too, if new)
+- `PUT /api/parts/:id` — update every field on an existing part (replaces quantity_in_stock, unlike /receive)
 - `POST /api/parts/:id/receive` — add received quantity to an existing part's stock
 
 Billing math lives in `backend/services/billing.js` and mirrors the
@@ -183,7 +184,11 @@ Done: PDF receipts/invoices, AUTO_INCREMENT schema fix (applied to live
 DB), New Repair Intake wired to the backend with repeat-customer and
 shop-wide instrument pickers (full instrument fields on creation), footer
 version + commit hash display, Parts Inventory (list + Receive Parts
-form), live NUC redeployed and confirmed current.
+form + click a part name to edit its full record via
+`GET`/`PUT /api/parts/:id`), `quantity_in_stock`/`reorder_level`/
+`reorder_unit` converted from `DECIMAL(10,2)` to `INT` (schema, migration,
+backend rounding, frontend `step`) since parts are counted in whole units,
+live NUC redeployed and confirmed current.
 
 ## Recommended way of working on this project going forward
 

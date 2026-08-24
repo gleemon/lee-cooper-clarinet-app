@@ -340,6 +340,15 @@ app.get("/api/invoices/:id/pdf", async (req, res) => {
   }
 });
 
+// Parts are counted in whole units -- quantity_in_stock, reorder_level, and
+// reorder_unit are all INT columns, so round anything the client sends
+// rather than trusting it to already be a whole number.
+function toIntOrNull(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const n = Math.round(Number(value));
+  return Number.isNaN(n) ? null : n;
+}
+
 // Parts vendors -- used by the "Receive Parts" form's vendor picker.
 app.get("/api/vendors", async (req, res) => {
   try {
@@ -427,10 +436,10 @@ app.put("/api/parts/:id", async (req, res) => {
         partName,
         description || null,
         category || null,
-        quantityInStock === "" || quantityInStock == null ? null : quantityInStock,
-        reorderLevel || null,
+        toIntOrNull(quantityInStock),
+        toIntOrNull(reorderLevel),
         reorderCost || null,
-        reorderUnit || null,
+        toIntOrNull(reorderUnit),
         reorderUrl || null,
         markup || null,
         resolvedVendorId,
@@ -498,10 +507,10 @@ app.post("/api/parts", async (req, res) => {
         partName,
         description || null,
         category || null,
-        quantityInStock || 0,
-        reorderLevel || null,
+        toIntOrNull(quantityInStock) ?? 0,
+        toIntOrNull(reorderLevel),
         reorderCost || null,
-        reorderUnit || null,
+        toIntOrNull(reorderUnit),
         reorderUrl || null,
         markup || null,
         resolvedVendorId
@@ -527,7 +536,7 @@ app.post("/api/parts", async (req, res) => {
 // accumulate correctly.
 app.post("/api/parts/:id/receive", async (req, res) => {
   try {
-    const qty = parseFloat(req.body.quantityReceived);
+    const qty = Math.round(Number(req.body.quantityReceived));
     if (!qty || qty <= 0) {
       return res.status(400).json({ error: "quantityReceived must be a positive number" });
     }
