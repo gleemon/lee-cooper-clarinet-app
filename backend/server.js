@@ -366,6 +366,97 @@ app.get("/api/parts", async (req, res) => {
   }
 });
 
+// Single part, joined with vendor name -- used by the part edit page.
+app.get("/api/parts/:id", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query(
+      "SELECT p.*, v.name AS vendor_name FROM parts_inventory p LEFT JOIN parts_vendors v ON p.vendor_id = v.id WHERE p.id = ?",
+      [req.params.id]
+    );
+    conn.release();
+    if (!rows[0]) return res.status(404).json({ error: "Part not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an existing part's record (and its vendor too, if it doesn't
+// already exist). Used by the part edit page -- unlike POST /receive,
+// this replaces quantity_in_stock rather than adding to it.
+app.put("/api/parts/:id", async (req, res) => {
+  const {
+    partName,
+    description,
+    category,
+    quantityInStock,
+    reorderLevel,
+    reorderCost,
+    reorderUnit,
+    reorderUrl,
+    markup,
+    vendorId,
+    vendorName
+  } = req.body;
+
+  if (!partName) {
+    return res.status(400).json({ error: "partName is required" });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    let resolvedVendorId = vendorId || null;
+    if (!resolvedVendorId && vendorName) {
+      const [vendorResult] = await conn.query(
+        "INSERT INTO parts_vendors (name) VALUES (?)",
+        [vendorName]
+      );
+      resolvedVendorId = vendorResult.insertId;
+    }
+
+    const [result] = await conn.query(
+      `UPDATE parts_inventory SET
+         part_name = ?, description = ?, category = ?, quantity_in_stock = ?,
+         reorder_level = ?, reorder_cost = ?, reorder_unit = ?, reorder_url = ?,
+         markup = ?, vendor_id = ?
+       WHERE id = ?`,
+      [
+        partName,
+        description || null,
+        category || null,
+        quantityInStock === "" || quantityInStock == null ? null : quantityInStock,
+        reorderLevel || null,
+        reorderCost || null,
+        reorderUnit || null,
+        reorderUrl || null,
+        markup || null,
+        resolvedVendorId,
+        req.params.id
+      ]
+    );
+
+    if (result.affectedRows === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: "Part not found" });
+    }
+
+    await conn.commit();
+    const [rows] = await conn.query(
+      "SELECT p.*, v.name AS vendor_name FROM parts_inventory p LEFT JOIN parts_vendors v ON p.vendor_id = v.id WHERE p.id = ?",
+      [req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
 // Create a new part record (and its vendor too, if it doesn't already
 // exist). Used by the "Receive Parts" form when the part being received
 // isn't in inventory yet.

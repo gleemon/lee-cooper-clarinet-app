@@ -609,6 +609,7 @@ function InventoryPage() {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [viewingPartId, setViewingPartId] = useState(null);
 
   const fetchParts = () => {
     setLoading(true);
@@ -619,13 +620,32 @@ function InventoryPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    fetchParts();
+  const fetchVendors = () => {
     axios
       .get(`${API_URL}/api/vendors`)
       .then((res) => setVendors(res.data))
       .catch((err) => console.error("Error fetching vendors:", err));
+  };
+
+  useEffect(() => {
+    fetchParts();
+    fetchVendors();
   }, []);
+
+  if (viewingPartId) {
+    return (
+      <PartEditPage
+        partId={viewingPartId}
+        vendors={vendors}
+        onBack={() => setViewingPartId(null)}
+        onSaved={() => {
+          setViewingPartId(null);
+          fetchParts();
+          fetchVendors();
+        }}
+      />
+    );
+  }
 
   return (
     <section className="page">
@@ -641,6 +661,7 @@ function InventoryPage() {
           onSaved={() => {
             setShowForm(false);
             fetchParts();
+            fetchVendors();
           }}
         />
       )}
@@ -667,7 +688,11 @@ function InventoryPage() {
               const low = p.reorder_level != null && inStock <= parseFloat(p.reorder_level);
               return (
                 <tr key={p.id}>
-                  <td>{p.part_name}</td>
+                  <td>
+                    <button className="link-btn" onClick={() => setViewingPartId(p.id)}>
+                      {p.part_name}
+                    </button>
+                  </td>
                   <td>{p.category || "--"}</td>
                   <td>{p.vendor_name || "--"}</td>
                   <td>
@@ -816,5 +841,172 @@ function ReceivePartsForm({ parts, vendors, onSaved }) {
         {submitting ? "Saving..." : "Add to Inventory"}
       </button>
     </form>
+  );
+}
+
+function PartEditPage({ partId, vendors, onBack, onSaved }) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [vendorId, setVendorId] = useState("");
+  const [formData, setFormData] = useState({
+    partName: "",
+    category: "",
+    description: "",
+    vendorName: "",
+    quantityInStock: "",
+    reorderLevel: "",
+    reorderCost: "",
+    reorderUnit: "",
+    reorderUrl: "",
+    markup: ""
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    axios
+      .get(`${API_URL}/api/parts/${partId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const p = res.data;
+        setVendorId(p.vendor_id ? String(p.vendor_id) : "");
+        setFormData({
+          partName: p.part_name || "",
+          category: p.category || "",
+          description: p.description || "",
+          vendorName: "",
+          quantityInStock: p.quantity_in_stock ?? "",
+          reorderLevel: p.reorder_level ?? "",
+          reorderCost: p.reorder_cost ?? "",
+          reorderUnit: p.reorder_unit ?? "",
+          reorderUrl: p.reorder_url || "",
+          markup: p.markup ?? ""
+        });
+      })
+      .catch((err) => {
+        console.error("Error fetching part:", err);
+        if (!cancelled) setLoadError("Could not load this part.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [partId]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.put(`${API_URL}/api/parts/${partId}`, {
+        partName: formData.partName,
+        category: formData.category,
+        description: formData.description,
+        quantityInStock: formData.quantityInStock,
+        reorderLevel: formData.reorderLevel,
+        reorderCost: formData.reorderCost,
+        reorderUnit: formData.reorderUnit,
+        reorderUrl: formData.reorderUrl,
+        markup: formData.markup,
+        ...(vendorId ? { vendorId } : { vendorName: formData.vendorName })
+      });
+      onSaved();
+    } catch (err) {
+      console.error("Error saving part:", err);
+      setError(err.response?.data?.error || "Could not save. Please try again.");
+    }
+    setSubmitting(false);
+  };
+
+  if (loading) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Inventory</button>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Inventory</button>
+        <p>{loadError}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="page">
+      <button className="btn-small" onClick={onBack} style={{ marginBottom: "1.5rem" }}>&larr; Back to Inventory</button>
+      <h2>Edit Part</h2>
+      {error && <p className="form-error">{error}</p>}
+      <form onSubmit={handleSubmit} className="form">
+        <div className="form-group">
+          <label>Part Name *</label>
+          <input type="text" name="partName" value={formData.partName} onChange={handleChange} required />
+        </div>
+        <div className="form-group">
+          <label>Category</label>
+          <input type="text" name="category" value={formData.category} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Description</label>
+          <textarea name="description" value={formData.description} onChange={handleChange} rows="2"></textarea>
+        </div>
+        <div className="form-group">
+          <label>Vendor</label>
+          <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+            <option value="">+ New Vendor</option>
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+        </div>
+        {!vendorId && (
+          <div className="form-group">
+            <label>New Vendor Name</label>
+            <input type="text" name="vendorName" value={formData.vendorName} onChange={handleChange} />
+          </div>
+        )}
+        <div className="form-group">
+          <label>Quantity In Stock</label>
+          <input type="number" name="quantityInStock" value={formData.quantityInStock} onChange={handleChange} step="0.01" />
+        </div>
+        <div className="form-group">
+          <label>Reorder Level</label>
+          <input type="number" name="reorderLevel" value={formData.reorderLevel} onChange={handleChange} step="0.01" />
+        </div>
+        <div className="form-group">
+          <label>Reorder Cost</label>
+          <input type="number" name="reorderCost" value={formData.reorderCost} onChange={handleChange} step="0.01" />
+        </div>
+        <div className="form-group">
+          <label>Reorder Unit (qty per order)</label>
+          <input type="number" name="reorderUnit" value={formData.reorderUnit} onChange={handleChange} step="0.01" />
+        </div>
+        <div className="form-group">
+          <label>Reorder URL</label>
+          <input type="text" name="reorderUrl" value={formData.reorderUrl} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Markup (multiplier)</label>
+          <input type="number" name="markup" value={formData.markup} onChange={handleChange} step="0.01" />
+        </div>
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? "Saving..." : "Save Changes"}
+        </button>
+      </form>
+    </section>
   );
 }
