@@ -1,6 +1,6 @@
 {
   "name": "lcc-app-frontend",
-  "version": "1.0.0",
+  "version": "1.38.0",
   "description": "React frontend for repair shop app",
   "type": "module",
   "scripts": {

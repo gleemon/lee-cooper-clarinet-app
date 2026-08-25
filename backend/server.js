@@ -347,8 +347,9 @@ const REPAIR_STATUSES = [
   "Received",
   "Diagnosis",
   "In Progress",
+  "Hold - Parts",
+  "Hold - Customer",
   "Ready for Pickup",
-  "Parts Ordered",
   "Complete",
   "Archive"
 ];

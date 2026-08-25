@@ -92,7 +92,7 @@ CREATE TABLE repairs (
   notion_url VARCHAR(64) UNIQUE,
   notion_repair_number INT,               -- the human-facing "Repair ID" ticket number from Notion
   title VARCHAR(255),
-  status VARCHAR(50) DEFAULT 'Received',  -- Received, Diagnosis, In Progress, Ready for Pickup, Parts Ordered, Complete, Archive
+  status VARCHAR(50) DEFAULT 'Received',  -- Received, Diagnosis, In Progress, Hold - Parts, Hold - Customer, Ready for Pickup, Complete, Archive
   customer_id INT,
   instrument_id INT,
   technician_id INT,

@@ -513,8 +513,9 @@ const REPAIR_STATUSES = [
   "Received",
   "Diagnosis",
   "In Progress",
+  "Hold - Parts",
+  "Hold - Customer",
   "Ready for Pickup",
-  "Parts Ordered",
   "Complete",
   "Archive"
 ];
@@ -527,7 +528,9 @@ const REPAIR_COLUMNS = [
 
 function RepairsPage({ repairs, loading, onView }) {
   const { sortField, sortDirection, handleSort } = useSort("intake_date", "desc");
-  const [statusFilter, setStatusFilter] = useState([]);
+  const [statusFilter, setStatusFilter] = useState(
+    REPAIR_STATUSES.filter((s) => s !== "Archive")
+  );
   const [search, setSearch] = useState("");
 
   if (loading) return <div className="page"><p>Loading...</p></div>;
@@ -599,11 +602,8 @@ function RepairsPage({ repairs, loading, onView }) {
             {sorted.map((repair) => (
               <tr key={repair.id}>
                 <td>
-                  <button className="link-btn repair-ticket-cell" onClick={() => onView(repair.id)}>
-                    <span className="repair-ticket-number">#{repair.ticketNumber}</span>
-                    <span className="repair-ticket-detail">
-                      {repair.customer_name || "N/A"} — {repair.instrument_name || "N/A"}
-                    </span>
+                  <button className="link-btn" onClick={() => onView(repair.id)}>
+                    #{repair.ticketNumber} — {repair.customer_name || "N/A"} — {repair.instrument_name || "N/A"}
                   </button>
                 </td>
                 <td><span className="status-badge">{repair.status}</span></td>

@@ -59,7 +59,7 @@ INSERT INTO repairs (id, notion_url, notion_repair_number, title, status, custom
   (7, '1e05268c9d1580bfa638e4ddd29e1c56', 17, 'Repair Ticket', 'Archive', 2, NULL, 1, '2025-04-25', '2025-05-09', NULL, NULL),
   (8, '1e25268c9d1580d0abf1e21e6774c2a4', 26, 'Tenon Corks', 'Complete', 4, 1, NULL, NULL, NULL, NULL, NULL),
   (9, '1e25268c9d1580daa3f4df97187aae6f', 28, 'Repair Ticket', 'Complete', 4, 1, 1, NULL, '2025-04-30', NULL, NULL),
-  (10, '1e25268c9d1580ea894de79644842d15', 25, 'Shop Use', 'Parts Ordered', 5, 2, NULL, NULL, NULL, NULL, NULL),
+  (10, '1e25268c9d1580ea894de79644842d15', 25, 'Shop Use', 'Hold - Parts', 5, 2, NULL, NULL, NULL, NULL, NULL),
   (11, '1e35268c9d1580a4a5d9f11fff4a222d', 29, 'Repair Ticket', 'Complete', 4, 5, 1, '2025-04-20', NULL, NULL, NULL),
   (12, '1e55268c9d158053aebae4fd45c65a6d', 32, 'Full Overhaul', 'Complete', 5, 6, 1, NULL, '2026-04-30', NULL, NULL),
   (13, '1f25268c9d1580d78f90e7389f19261c', 33, 'FBMarketplace Clarinet Intake', 'Complete', 5, 7, 1, NULL, '2025-08-01', NULL, NULL),

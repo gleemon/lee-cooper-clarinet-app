@@ -3,6 +3,13 @@ import react from "@vitejs/plugin-react";
 import { readFileSync } from "fs";
 import { execSync } from "child_process";
 
+// The version number can't be computed from `git rev-list --count` at build
+// time: the Docker build deliberately has no git/`.git` available (see the
+// comment in docker/Dockerfile), since that's what breaks Portainer's
+// git-stack deploys. So frontend/package.json's "version" is the source of
+// truth instead -- a plain file Docker can always copy. Convention: it's
+// "1.<total commit count as of this commit>.0", bumped by hand as part of
+// every commit (see PROJECT_STATUS.md).
 const { version } = JSON.parse(readFileSync("./package.json", "utf-8"));
 
 function getCommitHash() {
