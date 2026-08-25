@@ -332,6 +332,21 @@ body {
   text-decoration: underline;
 }
 
+.repair-ticket-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.repair-ticket-number {
+  font-weight: 600;
+}
+
+.repair-ticket-detail {
+  color: #666;
+  font-size: 0.85rem;
+}
+
 .status-badge {
   display: inline-block;
   padding: 0.35rem 0.75rem;

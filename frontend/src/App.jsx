@@ -176,7 +176,7 @@ export default function App() {
           className={`nav-btn ${currentPage === "repairs" ? "active" : ""}`}
           onClick={() => { setCurrentPage("repairs"); fetchRepairs(); }}
         >
-          All Repairs
+          Repairs
         </button>
         <button
           className={`nav-btn ${currentPage === "invoices" ? "active" : ""}`}
@@ -240,7 +240,7 @@ function HomePage({ onNewRepair }) {
         </div>
         <div className="card">
           <h3>Recent Repairs</h3>
-          <p>View and filter every repair in the "All Repairs" tab.</p>
+          <p>View and filter every repair in the "Repairs" tab.</p>
         </div>
       </div>
     </section>
@@ -520,9 +520,7 @@ const REPAIR_STATUSES = [
 ];
 
 const REPAIR_COLUMNS = [
-  { key: "ticketNumber", label: "Ticket #", type: "number" },
-  { key: "customer_name", label: "Customer", type: "string" },
-  { key: "instrument_name", label: "Instrument", type: "string" },
+  { key: "ticketNumber", label: "Repair Ticket", type: "number" },
   { key: "status", label: "Status", type: "string" },
   { key: "intake_date", label: "Intake Date", type: "date" }
 ];
@@ -559,7 +557,7 @@ function RepairsPage({ repairs, loading, onView }) {
 
   return (
     <section className="page">
-      <h2>All Repairs</h2>
+      <h2>Repairs</h2>
 
       <div className="filter-bar">
         <div className="form-group">
@@ -601,12 +599,13 @@ function RepairsPage({ repairs, loading, onView }) {
             {sorted.map((repair) => (
               <tr key={repair.id}>
                 <td>
-                  <button className="link-btn" onClick={() => onView(repair.id)}>
-                    {repair.ticketNumber}
+                  <button className="link-btn repair-ticket-cell" onClick={() => onView(repair.id)}>
+                    <span className="repair-ticket-number">#{repair.ticketNumber}</span>
+                    <span className="repair-ticket-detail">
+                      {repair.customer_name || "N/A"} — {repair.instrument_name || "N/A"}
+                    </span>
                   </button>
                 </td>
-                <td>{repair.customer_name || "N/A"}</td>
-                <td>{repair.instrument_name || "N/A"}</td>
                 <td><span className="status-badge">{repair.status}</span></td>
                 <td>{fmtDate(repair.intake_date)}</td>
               </tr>
