@@ -559,9 +559,14 @@ function RepairsPage({ repairs, loading, onView }) {
 
 function fmtDate(d) {
   if (!d) return "--";
-  const date = new Date(d);
-  if (isNaN(date.getTime())) return "--";
-  return date.toLocaleDateString();
+  // Parse the "YYYY-MM-DD" prefix directly rather than through `new Date()`,
+  // which treats a date-only string as UTC midnight -- converting that to
+  // the browser's local time zone can roll it back a day for anyone west
+  // of UTC (e.g. "2026-08-25" was displaying as 8/24/2026 in US time zones).
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  if (!match) return "--";
+  const [, year, month, day] = match;
+  return `${parseInt(month, 10)}/${parseInt(day, 10)}/${year}`;
 }
 
 function fmtMoney(n) {
