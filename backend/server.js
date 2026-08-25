@@ -117,6 +117,18 @@ app.put("/api/customers/:id", async (req, res) => {
   }
 });
 
+// Technicians -- used by the work log form's technician picker.
+app.get("/api/technicians", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query("SELECT * FROM technicians ORDER BY name ASC");
+    conn.release();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // All instruments in the shop's records, regardless of owner -- used by the
 // intake form's instrument picker. A repair's customer and instrument don't
 // have to match the same person (shop-owned instruments, loaners, repairs
@@ -327,6 +339,69 @@ app.get("/api/repairs/:id", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Log work (hours) against a repair. billable defaults to true -- only
+// billable entries count toward laborCost (see billing.js). technicianId
+// is optional (some historical entries have none), but billing can't
+// compute a rate without one.
+app.post("/api/repairs/:id/work-log", async (req, res) => {
+  try {
+    const { technicianId, label, hours, billable, date } = req.body;
+    const hoursNum = parseFloat(hours);
+    if (!hoursNum || hoursNum <= 0) {
+      return res.status(400).json({ error: "hours must be a positive number" });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      "INSERT INTO work_log (repair_id, technician_id, label, start_work, time_on_repair, billable) VALUES (?, ?, ?, ?, ?, ?)",
+      [req.params.id, technicianId || null, label || null, date || null, hoursNum, billable === false ? 0 : 1]
+    );
+    conn.release();
+    res.json({ id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Log a part used on a repair, and decrement its quantity_in_stock
+// accordingly. quantity_in_stock is deliberately allowed to go negative
+// (see docker/init-db/01-schema.sql) -- using more of a part than is on
+// hand just shows up as a shortfall rather than being blocked.
+app.post("/api/repairs/:id/parts-used", async (req, res) => {
+  const { partId, label, quantityUsed, customerCost, date } = req.body;
+  const qtyNum = parseFloat(quantityUsed);
+  if (!qtyNum || qtyNum <= 0) {
+    return res.status(400).json({ error: "quantityUsed must be a positive number" });
+  }
+  if (isNegative(customerCost)) {
+    return res.status(400).json({ error: "customerCost must be positive" });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [result] = await conn.query(
+      "INSERT INTO parts_used (repair_id, part_id, label, quantity_used, customer_cost, date_used) VALUES (?, ?, ?, ?, ?, ?)",
+      [req.params.id, partId || null, label || null, qtyNum, customerCost || null, date || null]
+    );
+
+    if (partId) {
+      await conn.query(
+        "UPDATE parts_inventory SET quantity_in_stock = COALESCE(quantity_in_stock, 0) - ? WHERE id = ?",
+        [Math.round(qtyNum), partId]
+      );
+    }
+
+    await conn.commit();
+    res.json({ id: result.insertId });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
   }
 });
 

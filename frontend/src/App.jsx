@@ -590,31 +590,43 @@ function markupPercentToMultiplier(percent) {
   return Number.isNaN(v) ? "" : String(1 + v / 100);
 }
 
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function RepairDetailPage({ repairId, onBack }) {
   const [repair, setRepair] = useState(null);
+  const [technicians, setTechnicians] = useState([]);
+  const [parts, setParts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [showWorkLogForm, setShowWorkLogForm] = useState(false);
+  const [showPartUsedForm, setShowPartUsedForm] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const fetchRepair = () => {
     setLoading(true);
     setError(null);
-    axios
+    return axios
       .get(`${API_URL}/api/repairs/${repairId}`)
-      .then((res) => {
-        if (!cancelled) setRepair(res.data);
-      })
+      .then((res) => setRepair(res.data))
       .catch((err) => {
         console.error("Error fetching repair:", err);
-        if (!cancelled) setError("Could not load this repair.");
+        setError("Could not load this repair.");
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchRepair();
+    axios
+      .get(`${API_URL}/api/technicians`)
+      .then((res) => setTechnicians(res.data))
+      .catch((err) => console.error("Error fetching technicians:", err));
+    axios
+      .get(`${API_URL}/api/parts`)
+      .then((res) => setParts(res.data))
+      .catch((err) => console.error("Error fetching parts:", err));
   }, [repairId]);
 
   const handleCreateInvoice = async () => {
@@ -678,7 +690,247 @@ function RepairDetailPage({ repairId, onBack }) {
           {creatingInvoice ? "Creating..." : "Create Invoice"}
         </button>
       </div>
+
+      <div style={{ marginTop: "2.5rem" }}>
+        <h3>Work Log</h3>
+        <button className="btn-small" style={{ margin: "0.75rem 0" }} onClick={() => setShowWorkLogForm((s) => !s)}>
+          {showWorkLogForm ? "Cancel" : "+ Log Work"}
+        </button>
+        {showWorkLogForm && (
+          <WorkLogForm
+            repairId={repairId}
+            technicians={technicians}
+            onSaved={() => {
+              setShowWorkLogForm(false);
+              fetchRepair();
+            }}
+          />
+        )}
+        {repair.workLog.length === 0 ? (
+          <p>No work logged yet.</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Technician</th>
+                <th>Description</th>
+                <th>Hours</th>
+                <th>Billable</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repair.workLog.map((w) => (
+                <tr key={w.id}>
+                  <td>{fmtDate(w.start_work)}</td>
+                  <td>{w.technician_name || "N/A"}</td>
+                  <td>{w.label || "--"}</td>
+                  <td>{w.time_on_repair ?? "--"}</td>
+                  <td>{w.billable ? "Yes" : "No"}</td>
+                  <td>{w.billable ? fmtMoney((parseFloat(w.hourly_rate) || 0) * (parseFloat(w.time_on_repair) || 0)) : "--"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ marginTop: "2.5rem" }}>
+        <h3>Parts Used</h3>
+        <button className="btn-small" style={{ margin: "0.75rem 0" }} onClick={() => setShowPartUsedForm((s) => !s)}>
+          {showPartUsedForm ? "Cancel" : "+ Add Part Used"}
+        </button>
+        {showPartUsedForm && (
+          <PartUsedForm
+            repairId={repairId}
+            parts={parts}
+            onSaved={() => {
+              setShowPartUsedForm(false);
+              fetchRepair();
+            }}
+          />
+        )}
+        {repair.partsUsed.length === 0 ? (
+          <p>No parts logged yet.</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Part</th>
+                <th>Quantity</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repair.partsUsed.map((p) => (
+                <tr key={p.id}>
+                  <td>{fmtDate(p.date_used)}</td>
+                  <td>{p.part_name || p.label || "N/A"}</td>
+                  <td>{p.quantity_used ?? "--"}</td>
+                  <td>{fmtMoney(p.customer_cost)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </section>
+  );
+}
+
+function WorkLogForm({ repairId, technicians, onSaved }) {
+  const [formData, setFormData] = useState({
+    technicianId: "",
+    label: "",
+    hours: "",
+    billable: true,
+    date: todayIsoDate()
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.post(`${API_URL}/api/repairs/${repairId}/work-log`, formData);
+      onSaved();
+    } catch (err) {
+      console.error("Error logging work:", err);
+      setError(err.response?.data?.error || "Could not save. Please try again.");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="form" style={{ marginBottom: "1.5rem" }}>
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-group">
+        <label>Technician</label>
+        <select name="technicianId" value={formData.technicianId} onChange={handleChange}>
+          <option value="">-- None --</option>
+          {technicians.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="form-group">
+        <label>Description</label>
+        <input type="text" name="label" value={formData.label} onChange={handleChange} placeholder="e.g. Repad - Upper" />
+      </div>
+      <div className="form-group">
+        <label>Date</label>
+        <input type="date" name="date" value={formData.date} onChange={handleChange} />
+      </div>
+      <div className="form-group">
+        <label>Hours *</label>
+        <input type="number" name="hours" value={formData.hours} onChange={handleChange} step="0.25" min="0" required />
+      </div>
+      <div className="form-group">
+        <label>
+          <input type="checkbox" name="billable" checked={formData.billable} onChange={handleChange} style={{ marginRight: "0.5rem" }} />
+          Billable
+        </label>
+      </div>
+      <button type="submit" className="btn-primary" disabled={submitting}>
+        {submitting ? "Saving..." : "Log Work"}
+      </button>
+    </form>
+  );
+}
+
+function PartUsedForm({ repairId, parts, onSaved }) {
+  const [partId, setPartId] = useState("");
+  const [formData, setFormData] = useState({
+    label: "",
+    quantityUsed: "1",
+    customerCost: "",
+    date: todayIsoDate()
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handlePartChange = (e) => {
+    const id = e.target.value;
+    setPartId(id);
+    const part = parts.find((p) => String(p.id) === id);
+    if (part) {
+      const qty = parseFloat(formData.quantityUsed) || 1;
+      const unitCost = (parseFloat(part.reorder_cost) || 0) * (parseFloat(part.markup) || 1);
+      setFormData((prev) => ({
+        ...prev,
+        label: part.part_name,
+        customerCost: unitCost ? (unitCost * qty).toFixed(2) : prev.customerCost
+      }));
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.post(`${API_URL}/api/repairs/${repairId}/parts-used`, {
+        partId: partId || null,
+        ...formData
+      });
+      onSaved();
+    } catch (err) {
+      console.error("Error logging part used:", err);
+      setError(err.response?.data?.error || "Could not save. Please try again.");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="form" style={{ marginBottom: "1.5rem" }}>
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-group">
+        <label>Part</label>
+        <select value={partId} onChange={handlePartChange}>
+          <option value="">-- Not in inventory --</option>
+          {parts.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.part_name} -- {p.quantity_in_stock ?? 0} in stock
+            </option>
+          ))}
+        </select>
+      </div>
+      {!partId && (
+        <div className="form-group">
+          <label>Description</label>
+          <input type="text" name="label" value={formData.label} onChange={handleChange} placeholder="e.g. Cork sheet" />
+        </div>
+      )}
+      <div className="form-group">
+        <label>Date</label>
+        <input type="date" name="date" value={formData.date} onChange={handleChange} />
+      </div>
+      <div className="form-group">
+        <label>Quantity Used *</label>
+        <input type="number" name="quantityUsed" value={formData.quantityUsed} onChange={handleChange} step="1" min="0" required />
+      </div>
+      <div className="form-group">
+        <label>Customer Cost</label>
+        <input type="number" name="customerCost" value={formData.customerCost} onChange={handleChange} step="0.01" min="0" />
+      </div>
+      <button type="submit" className="btn-primary" disabled={submitting}>
+        {submitting ? "Saving..." : "Add Part Used"}
+      </button>
+    </form>
   );
 }
 
