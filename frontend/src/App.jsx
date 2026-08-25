@@ -112,13 +112,7 @@ export default function App() {
         >
           Dashboard
         </button>
-        <button 
-          className={`nav-btn ${currentPage === "intake" ? "active" : ""}`}
-          onClick={() => setCurrentPage("intake")}
-        >
-          New Repair
-        </button>
-        <button 
+        <button
           className={`nav-btn ${currentPage === "repairs" ? "active" : ""}`}
           onClick={() => { setCurrentPage("repairs"); fetchRepairs(); }}
         >
@@ -151,7 +145,7 @@ export default function App() {
       </nav>
 
       <main className="main-content">
-        {currentPage === "home" && <HomePage />}
+        {currentPage === "home" && <HomePage onNewRepair={() => setCurrentPage("intake")} />}
         {currentPage === "intake" && <IntakePage onCreated={viewRepair} />}
         {currentPage === "repairs" && (
           <RepairsPage repairs={repairs} loading={loading} onView={viewRepair} />
@@ -175,14 +169,14 @@ export default function App() {
   );
 }
 
-function HomePage() {
+function HomePage({ onNewRepair }) {
   return (
     <section className="page">
       <h2>Dashboard</h2>
       <div className="dashboard-grid">
         <div className="card">
           <h3>Quick Actions</h3>
-          <button className="btn-primary">+ New Repair Intake</button>
+          <button className="btn-primary" onClick={onNewRepair}>+ New Repair Intake</button>
         </div>
         <div className="card">
           <h3>Recent Repairs</h3>
@@ -475,10 +469,16 @@ const REPAIR_COLUMNS = [
 
 function RepairsPage({ repairs, loading, onView }) {
   const { sortField, sortDirection, handleSort } = useSort("intake_date", "desc");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState([]);
   const [search, setSearch] = useState("");
 
   if (loading) return <div className="page"><p>Loading...</p></div>;
+
+  const toggleStatusFilter = (status) => {
+    setStatusFilter((prev) =>
+      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
+    );
+  };
 
   const withTicketNumber = repairs.map((r) => ({
     ...r,
@@ -486,7 +486,7 @@ function RepairsPage({ repairs, loading, onView }) {
   }));
 
   const filtered = withTicketNumber.filter((r) => {
-    if (statusFilter && r.status !== statusFilter) return false;
+    if (statusFilter.length > 0 && !statusFilter.includes(r.status)) return false;
     if (search) {
       const q = search.toLowerCase();
       const haystack = `${r.customer_name || ""} ${r.instrument_name || ""} ${r.title || ""}`.toLowerCase();
@@ -504,12 +504,18 @@ function RepairsPage({ repairs, loading, onView }) {
       <div className="filter-bar">
         <div className="form-group">
           <label>Status</label>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="">All Statuses</option>
+          <div className="checkbox-group">
             {REPAIR_STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <label key={s} className="checkbox-option">
+                <input
+                  type="checkbox"
+                  checked={statusFilter.includes(s)}
+                  onChange={() => toggleStatusFilter(s)}
+                />
+                {s}
+              </label>
             ))}
-          </select>
+          </div>
         </div>
         <div className="form-group">
           <label>Search</label>

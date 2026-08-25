@@ -245,6 +245,25 @@ body {
   min-width: 200px;
 }
 
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: normal;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.checkbox-option input {
+  cursor: pointer;
+}
+
 .sort-header {
   background: none;
   border: none;
