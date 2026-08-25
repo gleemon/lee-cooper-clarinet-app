@@ -245,12 +245,6 @@ body {
   min-width: 200px;
 }
 
-.checkbox-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-}
-
 .checkbox-option {
   display: flex;
   align-items: center;
@@ -262,6 +256,51 @@ body {
 
 .checkbox-option input {
   cursor: pointer;
+}
+
+.multiselect {
+  position: relative;
+}
+
+.multiselect-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.multiselect-trigger:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.multiselect-caret {
+  color: #999;
+  font-size: 0.8rem;
+}
+
+.multiselect-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  min-width: 100%;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .sort-header {

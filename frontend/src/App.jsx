@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import "./App.css";
 
@@ -64,6 +64,66 @@ function SortableHeaderRow({ columns, sortField, sortDirection, onSort }) {
         </th>
       ))}
     </tr>
+  );
+}
+
+// Dropdown checkbox list for filtering by multiple values at once (e.g.
+// repair status). Closes on selecting an option outside itself or pressing
+// Escape.
+function MultiSelectDropdown({ label, options, selected, onToggle, allLabel }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const handleEscape = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
+  const buttonText =
+    selected.length === 0
+      ? allLabel
+      : selected.length === 1
+      ? selected[0]
+      : `${selected.length} selected`;
+
+  return (
+    <div className="multiselect" ref={ref}>
+      <button
+        type="button"
+        className="multiselect-trigger"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        {buttonText}
+        <span className="multiselect-caret">▾</span>
+      </button>
+      {open && (
+        <div className="multiselect-panel" role="listbox" aria-label={label}>
+          {options.map((opt) => (
+            <label key={opt} className="checkbox-option">
+              <input
+                type="checkbox"
+                checked={selected.includes(opt)}
+                onChange={() => onToggle(opt)}
+              />
+              {opt}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -504,18 +564,13 @@ function RepairsPage({ repairs, loading, onView }) {
       <div className="filter-bar">
         <div className="form-group">
           <label>Status</label>
-          <div className="checkbox-group">
-            {REPAIR_STATUSES.map((s) => (
-              <label key={s} className="checkbox-option">
-                <input
-                  type="checkbox"
-                  checked={statusFilter.includes(s)}
-                  onChange={() => toggleStatusFilter(s)}
-                />
-                {s}
-              </label>
-            ))}
-          </div>
+          <MultiSelectDropdown
+            label="Status"
+            options={REPAIR_STATUSES}
+            selected={statusFilter}
+            onToggle={toggleStatusFilter}
+            allLabel="All Statuses"
+          />
         </div>
         <div className="form-group">
           <label>Search</label>
