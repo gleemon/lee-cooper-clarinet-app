@@ -26,7 +26,7 @@ export async function getRepairBillingDetails(pool, repairId) {
     if (!repair) return null;
 
     const [workLogRows] = await conn.query(
-      `SELECT w.id, w.label, w.time_on_repair, w.billable, w.start_work, t.hourly_rate, t.name AS technician_name
+      `SELECT w.id, w.label, w.time_on_repair, w.billable, w.start_work, w.technician_id, t.hourly_rate, t.name AS technician_name
        FROM work_log w
        LEFT JOIN technicians t ON w.technician_id = t.id
        WHERE w.repair_id = ?
@@ -35,7 +35,7 @@ export async function getRepairBillingDetails(pool, repairId) {
     );
 
     const [partsRows] = await conn.query(
-      `SELECT pu.id, pu.label, pu.quantity_used, pu.customer_cost, pu.date_used, p.part_name
+      `SELECT pu.id, pu.label, pu.quantity_used, pu.customer_cost, pu.date_used, pu.part_id, p.part_name
        FROM parts_used pu
        LEFT JOIN parts_inventory p ON pu.part_id = p.id
        WHERE pu.repair_id = ?`,

@@ -97,9 +97,10 @@ Source files:
 - `GET /api/health`
 - `GET /api/customers`, `POST /api/customers`, `GET /api/customers/:id`, `PUT /api/customers/:id`
 - `GET /api/repairs`, `POST /api/repairs`, `GET /api/repairs/:id`
+- `PUT /api/repairs/:id/status` — validates against the schema's status list; auto-stamps `completion_date` the first time a repair is set to "Complete"
 - `GET /api/technicians` — used by the work log form's technician picker
-- `POST /api/repairs/:id/work-log` — log hours (billable defaults to true; only billable entries count toward laborCost)
-- `POST /api/repairs/:id/parts-used` — log a part used; decrements the part's quantity_in_stock (allowed to go negative)
+- `POST /api/repairs/:id/work-log`, `PUT /api/work-log/:id` — log/edit hours (billable defaults to true; only billable entries count toward laborCost)
+- `POST /api/repairs/:id/parts-used`, `PUT /api/parts-used/:id` — log/edit a part used; keeps the part's quantity_in_stock reconciled on every write, including edits that change the quantity or swap which part was used (allowed to go negative)
 - `GET /api/repairs/:id/receipt.pdf` — "Repair Estimate & Receipt" PDF
 - `GET /api/invoices`, `POST /api/invoices`, `GET /api/invoices/:id`
 - `GET /api/invoices/:id/pdf` — itemized invoice PDF (labor + parts + tax)
@@ -145,15 +146,20 @@ captures make/model/serial/purchase date/purchase cost/valuation, not just
 type), All Repairs (renamed from "Active Repairs" -- shows every repair
 regardless of status by default; filterable by status and free-text search
 across customer/instrument/title; sortable columns; clicking the ticket
-number opens the repair detail page), Repair Detail (shows
-status/customer/instrument/billing, links to Print Receipt and Create
-Invoice, and now has Work Log / Parts Used sections with their own
-"+ Log Work" / "+ Add Part Used" forms -- logging work needs hours and
-optionally a technician/description/billable flag; logging a part picks
-from inventory (auto-suggests customer cost from reorder_cost × markup,
-editable) or falls back to a free-text description for anything not in
-inventory, and decrements the part's stock. Both refresh the billing
-totals immediately on save), Invoices (sortable columns; filterable by payment status and
+number opens the repair detail page), Repair Detail (status is a
+dropdown -- picking a value saves immediately via
+`PUT /api/repairs/:id/status`; shows customer/instrument/billing, links
+to Print Receipt and Create Invoice, and has Work Log / Parts Used
+sections with their own "+ Log Work" / "+ Add Part Used" forms --
+logging work needs hours and optionally a technician/description/billable
+flag; logging a part picks from inventory (auto-suggests customer cost
+from reorder_cost × markup, editable) or falls back to a free-text
+description for anything not in inventory, and decrements the part's
+stock. Every row's date is clickable (the same `.link-btn` pattern used
+elsewhere) to reopen that same form pre-filled for editing -- editing a
+parts-used entry reconciles inventory correctly even if the quantity or
+the part itself changes. All of this refreshes the billing totals
+immediately on save), Invoices (sortable columns; filterable by payment status and
 free-text search across customer/repair; links to each invoice's PDF),
 Inventory (sortable columns; filterable by category, vendor, and free-text
 search; a "Low Stock" flag when quantity_in_stock <= reorder_level; markup
@@ -204,10 +210,7 @@ is actually deployed.
 
 ## Immediate next steps (in order)
 
-1. **Repair status updates.** Status is set to "Received" at intake and
-   never changes through the app (Diagnosis → In Progress → Ready for
-   Pickup → Complete all require a direct DB edit today).
-2. **Email customers when a repair is done.** A "Notify Customer" button
+1. **Email customers when a repair is done.** A "Notify Customer" button
    on the Repair Detail page (next to Print Receipt / Create Invoice),
    triggered manually rather than automatically on status change, so
    nothing gets emailed by accident while someone's just editing a
@@ -216,15 +219,26 @@ is actually deployed.
    Gmail "app password" -- no new service/account needed, fine at this
    shop's volume. (Tradeoff noted at decision time: a dedicated
    transactional service like Resend/SendGrid would be more reliable at
-   scale, but Gmail SMTP is the pragmatic starting point here.)
-3. Lower priority: deleting parts/vendors/customers/instruments/repairs/
+   scale, but Gmail SMTP is the pragmatic starting point here.) Natural
+   trigger point now that status updates exist: offer to notify when a
+   repair is set to "Complete".
+2. **Mobile table scroll.** Confirmed via testing: none of the data
+   tables (Inventory, All Repairs, Invoices, Customers, Instruments) are
+   wrapped for horizontal scrolling, so a wide table (e.g. Inventory's 7
+   columns) forces the whole page to widen past a phone's viewport
+   instead of scrolling within its own box. Fix is small and contained:
+   wrap each `<table>` in an `overflow-x: auto` container.
+3. **Inline spreadsheet-style editing** for the Inventory table (editable
+   cells + a `PATCH /api/parts/:id`-style save-per-field), discussed but
+   not scoped in detail yet.
+4. Lower priority: deleting parts/vendors/customers/instruments/repairs/
    work-log/parts-used entries (nothing in the app deletes anything
-   today -- editing exists for parts/customers/instruments, not yet for
-   vendors/repairs/invoices/work-log/parts-used), a live dashboard
-   (currently static), a Technicians/Vendors management page (both have
-   DB tables and are referenced elsewhere but have no page of their own
-   yet), auth (currently none — fine for LAN-only use, worth a
-   conscious decision before any external exposure).
+   today -- editing exists for parts/customers/instruments/repair
+   status/work-log/parts-used, not yet for vendors/repairs/invoices), a
+   live dashboard (currently static), a Technicians/Vendors management
+   page (both have DB tables and are referenced elsewhere but have no
+   page of their own yet), auth (currently none — fine for LAN-only use,
+   worth a conscious decision before any external exposure).
 
 Done: PDF receipts/invoices, AUTO_INCREMENT schema fix (applied to live
 DB), New Repair Intake wired to the backend with repeat-customer and
@@ -246,12 +260,16 @@ new list page (see "Frontend" section above), filters added to Invoices
 (payment status + search) and Inventory (category + vendor + search),
 two new pages built to the same standard: Customers (list + edit,
 `GET`/`PUT /api/customers/:id`) and Instruments (list + edit including
-reassigning the owner, `GET`/`PUT /api/instruments/:id`), and labor/parts
+reassigning the owner, `GET`/`PUT /api/instruments/:id`), labor/parts
 logging on a repair -- `GET /api/technicians`,
-`POST /api/repairs/:id/work-log`, `POST /api/repairs/:id/parts-used`
-(decrements inventory), plus Work Log / Parts Used sections and forms on
-the Repair Detail page, closing the gap that meant every receipt/invoice
-used to total $0.
+`POST`/`PUT /api/repairs/:id/work-log`,
+`POST`/`PUT /api/repairs/:id/parts-used` (both editable, not just
+create-only; edits reconcile inventory correctly even across a quantity
+or part change), plus Work Log / Parts Used sections and forms on the
+Repair Detail page, closing the gap that meant every receipt/invoice
+used to total $0, and repair status updates --
+`PUT /api/repairs/:id/status`, a dropdown on Repair Detail, auto-stamps
+`completion_date` the first time a repair is marked Complete.
 
 ## Recommended way of working on this project going forward
 

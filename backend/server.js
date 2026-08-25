@@ -342,6 +342,46 @@ app.get("/api/repairs/:id", async (req, res) => {
   }
 });
 
+// The full set of statuses a repair can have (see docker/init-db/01-schema.sql).
+const REPAIR_STATUSES = [
+  "Received",
+  "Diagnosis",
+  "In Progress",
+  "Ready for Pickup",
+  "Parts Ordered",
+  "Complete",
+  "Archive"
+];
+
+// Update a repair's status. Setting it to "Complete" also stamps
+// completion_date with today's date if it isn't already set -- the column
+// existed in the schema but nothing in the app ever populated it before.
+app.put("/api/repairs/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!REPAIR_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${REPAIR_STATUSES.join(", ")}` });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      `UPDATE repairs SET status = ?, completion_date = CASE
+         WHEN ? = 'Complete' AND completion_date IS NULL THEN CURDATE()
+         ELSE completion_date
+       END WHERE id = ?`,
+      [status, status, req.params.id]
+    );
+    if (result.affectedRows === 0) {
+      conn.release();
+      return res.status(404).json({ error: "Repair not found" });
+    }
+    const [rows] = await conn.query("SELECT * FROM repairs WHERE id = ?", [req.params.id]);
+    conn.release();
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Log work (hours) against a repair. billable defaults to true -- only
 // billable entries count toward laborCost (see billing.js). technicianId
 // is optional (some historical entries have none), but billing can't
@@ -397,6 +437,86 @@ app.post("/api/repairs/:id/parts-used", async (req, res) => {
 
     await conn.commit();
     res.json({ id: result.insertId });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// Update an existing work log entry.
+app.put("/api/work-log/:id", async (req, res) => {
+  try {
+    const { technicianId, label, hours, billable, date } = req.body;
+    const hoursNum = parseFloat(hours);
+    if (!hoursNum || hoursNum <= 0) {
+      return res.status(400).json({ error: "hours must be a positive number" });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      "UPDATE work_log SET technician_id = ?, label = ?, start_work = ?, time_on_repair = ?, billable = ? WHERE id = ?",
+      [technicianId || null, label || null, date || null, hoursNum, billable === false ? 0 : 1, req.params.id]
+    );
+    conn.release();
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Work log entry not found" });
+    res.json({ id: req.params.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an existing parts-used entry. Reconciles quantity_in_stock for
+// both the old and new part -- restores whatever the old entry consumed,
+// then decrements whatever the updated entry consumes, so edits (changing
+// quantity, or even swapping which part was used) keep inventory accurate
+// rather than double-counting.
+app.put("/api/parts-used/:id", async (req, res) => {
+  const { partId, label, quantityUsed, customerCost, date } = req.body;
+  const qtyNum = parseFloat(quantityUsed);
+  if (!qtyNum || qtyNum <= 0) {
+    return res.status(400).json({ error: "quantityUsed must be a positive number" });
+  }
+  if (isNegative(customerCost)) {
+    return res.status(400).json({ error: "customerCost must be positive" });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [existingRows] = await conn.query(
+      "SELECT part_id, quantity_used FROM parts_used WHERE id = ?",
+      [req.params.id]
+    );
+    if (!existingRows[0]) {
+      await conn.rollback();
+      conn.release();
+      return res.status(404).json({ error: "Parts-used entry not found" });
+    }
+    const existing = existingRows[0];
+
+    if (existing.part_id) {
+      await conn.query(
+        "UPDATE parts_inventory SET quantity_in_stock = COALESCE(quantity_in_stock, 0) + ? WHERE id = ?",
+        [Math.round(parseFloat(existing.quantity_used)), existing.part_id]
+      );
+    }
+
+    await conn.query(
+      "UPDATE parts_used SET part_id = ?, label = ?, quantity_used = ?, customer_cost = ?, date_used = ? WHERE id = ?",
+      [partId || null, label || null, qtyNum, customerCost || null, date || null, req.params.id]
+    );
+
+    if (partId) {
+      await conn.query(
+        "UPDATE parts_inventory SET quantity_in_stock = COALESCE(quantity_in_stock, 0) - ? WHERE id = ?",
+        [Math.round(qtyNum), partId]
+      );
+    }
+
+    await conn.commit();
+    res.json({ id: req.params.id });
   } catch (err) {
     await conn.rollback();
     res.status(500).json({ error: err.message });
