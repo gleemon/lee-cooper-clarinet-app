@@ -31,17 +31,18 @@ any committed file.
 
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
-  method). Confirmed live and up to date as of commit `f96658c` (this was
-  redeployed from the other workstation without a PROJECT_STATUS.md
-  update, so don't trust this file's deployment status at face value --
-  cross-check Portainer's `ConfigHash` via the API described below).
-  **Not yet deployed**: just `320d62f` onward (Print Ticket rename,
-  `.action-bar`, Estimated Cost defaults) as of this writing.
-- Both pending migrations have been confirmed **already run** against
-  the live DB (checked via the live API's JSON typing -- `INT` columns
-  come back as bare numbers, `DECIMAL` columns as quoted strings --
-  and by confirming no repair is left with the old `'Parts Ordered'`
-  status): `migrate-parts-integer-columns.sql` and
+  method). Confirmed live and up to date as of commit `f91a731`
+  (redeployed 2026-08-26 via the Portainer API method below) -- this
+  includes everything in the "Done" list at the bottom of this file.
+  This file has been caught by surprise twice now by redeploys/migrations
+  done without a PROJECT_STATUS.md update -- treat this section as a
+  claim to verify, not a fact, and cross-check Portainer's `ConfigHash`
+  via the API before assuming what's live.
+- Both migrations that used to be pending have been confirmed run
+  against the live DB (checked via the live API's JSON typing -- `INT`
+  columns come back as bare numbers, `DECIMAL` columns as quoted
+  strings -- and by confirming no repair is left with the old
+  `'Parts Ordered'` status): `migrate-parts-integer-columns.sql` and
   `migrate-parts-ordered-status.sql`. Don't re-run them.
 - MariaDB running in its own container (`lcc-mariadb`) with a named volume
   (`lcc_mariadb_data`) for persistence. The AUTO_INCREMENT schema migration
