@@ -578,18 +578,53 @@ app.get("/api/invoices/:id", async (req, res) => {
 });
 
 // Create an invoice for a repair. due_date/tax_rate/payment_status are
-// optional -- payment_status defaults to Unpaid.
+// optional -- payment_status defaults to Unpaid. Idempotent: a repair
+// can only have one invoice, so if one already exists for repair_id,
+// it's returned as-is instead of creating a duplicate (previously,
+// clicking "Create Invoice" more than once created a separate invoice
+// row each time).
 app.post("/api/invoices", async (req, res) => {
   try {
     const { repair_id, name, due_date, tax_rate, payment_status } = req.body;
     if (!repair_id) return res.status(400).json({ error: "repair_id is required" });
     const conn = await pool.getConnection();
+
+    const [existingRows] = await conn.query("SELECT * FROM invoices WHERE repair_id = ?", [repair_id]);
+    if (existingRows[0]) {
+      conn.release();
+      return res.json(existingRows[0]);
+    }
+
     const [result] = await conn.query(
       "INSERT INTO invoices (name, repair_id, invoice_date, due_date, payment_status, tax_rate) VALUES (?, ?, CURDATE(), ?, ?, ?)",
       [name || null, repair_id, due_date || null, payment_status || "Unpaid", tax_rate || null]
     );
     conn.release();
     res.json({ id: result.insertId, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an existing invoice's editable fields.
+app.put("/api/invoices/:id", async (req, res) => {
+  try {
+    const { name, due_date, tax_rate, payment_status } = req.body;
+    if (isNegative(tax_rate)) {
+      return res.status(400).json({ error: "tax_rate must be positive" });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      "UPDATE invoices SET name = ?, due_date = ?, tax_rate = ?, payment_status = ? WHERE id = ?",
+      [name || null, due_date || null, tax_rate || null, payment_status || "Unpaid", req.params.id]
+    );
+    if (result.affectedRows === 0) {
+      conn.release();
+      return res.status(404).json({ error: "Invoice not found" });
+    }
+    const [rows] = await conn.query("SELECT * FROM invoices WHERE id = ?", [req.params.id]);
+    conn.release();
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

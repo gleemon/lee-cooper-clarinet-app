@@ -660,6 +660,21 @@ function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// tax_rate is stored as a fraction (0.06 = 6%) but shown/entered as a
+// plain percentage -- unlike markup, this is a straight x100, not a
+// cost multiplier.
+function taxFractionToPercent(fraction) {
+  if (fraction === null || fraction === undefined || fraction === "") return "";
+  const v = Number(fraction);
+  return Number.isNaN(v) ? "" : String(Math.round(v * 100 * 100) / 100);
+}
+
+function taxPercentToFraction(percent) {
+  if (percent === null || percent === undefined || percent === "") return "";
+  const v = Number(percent);
+  return Number.isNaN(v) ? "" : String(v / 100);
+}
+
 function RepairDetailPage({ repairId, onBack }) {
   const [repair, setRepair] = useState(null);
   const [technicians, setTechnicians] = useState([]);
@@ -776,11 +791,13 @@ function RepairDetailPage({ repairId, onBack }) {
           target="_blank"
           rel="noopener noreferrer"
         >
-          Print Ticket
+          Print Repair Ticket
         </a>
-        <button className="btn-primary" onClick={handleCreateInvoice} disabled={creatingInvoice}>
-          {creatingInvoice ? "Creating..." : "Create Invoice"}
-        </button>
+        {repair.status === "Ready for Pickup" && (
+          <button className="btn-primary" onClick={handleCreateInvoice} disabled={creatingInvoice}>
+            {creatingInvoice ? "Creating..." : "Create Invoice"}
+          </button>
+        )}
       </div>
 
       <div style={{ marginTop: "2.5rem" }}>
@@ -1091,26 +1108,36 @@ const INVOICE_COLUMNS = [
 function InvoicesPage({ onViewRepair }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [viewingInvoiceId, setViewingInvoiceId] = useState(null);
   const { sortField, sortDirection, handleSort } = useSort("invoice_date", "desc");
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
+  const fetchInvoices = () => {
     setLoading(true);
-    axios
+    return axios
       .get(`${API_URL}/api/invoices`)
-      .then((res) => {
-        if (!cancelled) setInvoices(res.data);
-      })
+      .then((res) => setInvoices(res.data))
       .catch((err) => console.error("Error fetching invoices:", err))
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchInvoices();
   }, []);
+
+  if (viewingInvoiceId) {
+    return (
+      <InvoiceEditPage
+        invoiceId={viewingInvoiceId}
+        onBack={() => setViewingInvoiceId(null)}
+        onSaved={() => {
+          setViewingInvoiceId(null);
+          fetchInvoices();
+        }}
+      />
+    );
+  }
 
   if (loading) return <div className="page"><p>Loading...</p></div>;
 
@@ -1174,7 +1201,11 @@ function InvoicesPage({ onViewRepair }) {
           <tbody>
             {sorted.map((inv) => (
               <tr key={inv.id}>
-                <td>{inv.invoiceNumber}</td>
+                <td>
+                  <button className="link-btn" onClick={() => setViewingInvoiceId(inv.id)}>
+                    {inv.invoiceNumber}
+                  </button>
+                </td>
                 <td>
                   <button className="link-btn" onClick={() => onViewRepair(inv.repair_id)}>
                     {inv.repair_title || `Repair #${inv.notion_repair_number ?? inv.repair_id}`}
@@ -1200,6 +1231,122 @@ function InvoicesPage({ onViewRepair }) {
           </tbody>
         </table>
       )}
+    </section>
+  );
+}
+
+function InvoiceEditPage({ invoiceId, onBack, onSaved }) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [formData, setFormData] = useState({
+    name: "",
+    dueDate: "",
+    paymentStatus: "Unpaid",
+    taxRate: ""
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    axios
+      .get(`${API_URL}/api/invoices/${invoiceId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const inv = res.data;
+        setFormData({
+          name: inv.name || "",
+          dueDate: toDateInputValue(inv.due_date),
+          paymentStatus: inv.payment_status || "Unpaid",
+          taxRate: taxFractionToPercent(inv.tax_rate)
+        });
+      })
+      .catch((err) => {
+        console.error("Error fetching invoice:", err);
+        if (!cancelled) setLoadError("Could not load this invoice.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [invoiceId]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.put(`${API_URL}/api/invoices/${invoiceId}`, {
+        name: formData.name,
+        due_date: formData.dueDate,
+        payment_status: formData.paymentStatus,
+        tax_rate: taxPercentToFraction(formData.taxRate)
+      });
+      onSaved();
+    } catch (err) {
+      console.error("Error saving invoice:", err);
+      setError(err.response?.data?.error || "Could not save. Please try again.");
+    }
+    setSubmitting(false);
+  };
+
+  if (loading) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Invoices</button>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Invoices</button>
+        <p>{loadError}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="page">
+      <button className="btn-small" onClick={onBack} style={{ marginBottom: "1.5rem" }}>&larr; Back to Invoices</button>
+      <h2>Edit Invoice</h2>
+      {error && <p className="form-error">{error}</p>}
+      <form onSubmit={handleSubmit} className="form">
+        <div className="form-group">
+          <label>Name</label>
+          <input type="text" name="name" value={formData.name} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Due Date</label>
+          <input type="date" name="dueDate" value={formData.dueDate} onChange={handleChange} />
+        </div>
+        <div className="form-group">
+          <label>Payment Status</label>
+          <select name="paymentStatus" value={formData.paymentStatus} onChange={handleChange}>
+            {INVOICE_PAYMENT_STATUSES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Tax Rate (%)</label>
+          <input type="number" name="taxRate" value={formData.taxRate} onChange={handleChange} step="0.01" min="0" placeholder="e.g. 6 for 6%" />
+        </div>
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? "Saving..." : "Save Changes"}
+        </button>
+      </form>
     </section>
   );
 }

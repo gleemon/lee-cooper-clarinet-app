@@ -31,13 +31,15 @@ any committed file.
 
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
-  method). Confirmed live and up to date as of commit `f91a731`
-  (redeployed 2026-08-26 via the Portainer API method below) -- this
-  includes everything in the "Done" list at the bottom of this file.
-  This file has been caught by surprise twice now by redeploys/migrations
-  done without a PROJECT_STATUS.md update -- treat this section as a
-  claim to verify, not a fact, and cross-check Portainer's `ConfigHash`
-  via the API before assuming what's live.
+  method). Confirmed live as of commit `f91a731` (redeployed 2026-08-26
+  via the Portainer API method below). **Not yet deployed**: the
+  invoice/ticket changes from later the same day -- Print Repair Ticket
+  rename, conditional Create Invoice button, idempotent invoice
+  creation, and invoice editing (see "Done" list at the bottom for the
+  full set). This file has been caught by surprise twice now by
+  redeploys/migrations done without a PROJECT_STATUS.md update -- treat
+  this section as a claim to verify, not a fact, and cross-check
+  Portainer's `ConfigHash` via the API before assuming what's live.
 - Both migrations that used to be pending have been confirmed run
   against the live DB (checked via the live API's JSON typing -- `INT`
   columns come back as bare numbers, `DECIMAL` columns as quoted
@@ -113,7 +115,9 @@ Source files:
 - `POST /api/repairs/:id/work-log`, `PUT /api/work-log/:id` — log/edit hours (billable defaults to true; only billable entries count toward laborCost)
 - `POST /api/repairs/:id/parts-used`, `PUT /api/parts-used/:id` — log/edit a part used; keeps the part's quantity_in_stock reconciled on every write, including edits that change the quantity or swap which part was used (allowed to go negative)
 - `GET /api/repairs/:id/receipt.pdf` — "Repair Estimate & Receipt" PDF
-- `GET /api/invoices`, `POST /api/invoices`, `GET /api/invoices/:id`
+- `GET /api/invoices`, `GET /api/invoices/:id`
+- `POST /api/invoices` — idempotent: a repair can only have one invoice, so if one already exists for `repair_id` it's returned as-is instead of inserting a duplicate
+- `PUT /api/invoices/:id` — update name/due_date/payment_status/tax_rate
 - `GET /api/invoices/:id/pdf` — itemized invoice PDF (labor + parts + tax)
 - `GET /api/instruments` (shop-wide, joined with owner name), `GET /api/instruments/:id`, `PUT /api/instruments/:id` (owner is settable/unsettable via `ownerCustomerId`)
 - `GET /api/vendors`, `GET /api/parts`, `GET /api/parts/:id` — parts inventory, joined with vendor name
@@ -169,10 +173,13 @@ customer/instrument/title; sortable columns; each row is a single
 clickable line -- ticket # — customer — instrument -- instead of three
 separate columns), Repair Detail (status is a dropdown -- picking a value
 saves immediately via `PUT /api/repairs/:id/status`; shows
-customer/instrument/billing; action buttons (Print Ticket, Create
-Invoice, and anything added later) live in a `.action-bar` flex-row
-container so they always line up in one row instead of needing manual
-spacing per button; has Work Log / Parts Used sections with their own
+customer/instrument/billing; action buttons live in a `.action-bar`
+flex-row container so they always line up in one row instead of needing
+manual spacing per button -- currently Print Repair Ticket (always) and
+Create Invoice (only shown when status is "Ready for Pickup"; clicking
+it when an invoice already exists for this repair just reopens that
+same invoice's PDF rather than creating a duplicate, since
+`POST /api/invoices` is idempotent per repair); has Work Log / Parts Used sections with their own
 "+ Log Work" / "+ Add Part Used" forms -- logging work needs hours and
 optionally a technician/description/billable flag; logging a part picks
 from inventory (auto-suggests customer cost from reorder_cost × markup,
@@ -183,7 +190,12 @@ pre-filled for editing -- editing a parts-used entry reconciles inventory
 correctly even if the quantity or the part itself changes. All of this
 refreshes the billing totals immediately on save), Invoices (sortable
 columns; filterable by payment status and free-text search across
-customer/repair; links to each invoice's PDF), Inventory (sortable
+customer/repair; clicking the repair name opens that repair's detail
+page, clicking the invoice number opens an edit page for
+name/due_date/payment_status/tax_rate (tax rate shown/entered as a
+percentage, e.g. "6" for 6%, stored as the fraction `0.06` -- same
+percent-in-UI/fraction-in-DB spirit as markup, just without markup's
++1 multiplier math); links to each invoice's PDF), Inventory (sortable
 columns; filterable by category, vendor, and free-text search; a "Low
 Stock" flag when quantity_in_stock <= reorder_level; markup shown as a
 percentage; a "Receive Parts" form -- pick an existing part to add
@@ -247,7 +259,7 @@ commit is actually deployed.
 ## Immediate next steps (in order)
 
 1. **Email customers when a repair is done.** A "Notify Customer" button
-   in Repair Detail's `.action-bar` (next to Print Ticket / Create Invoice),
+   in Repair Detail's `.action-bar` (next to Print Repair Ticket / Create Invoice),
    triggered manually rather than automatically on status change, so
    nothing gets emailed by accident while someone's just editing a
    ticket. Planned approach: `nodemailer` over SMTP using the shop's
@@ -314,15 +326,22 @@ is now a multi-select dropdown (new shared `MultiSelectDropdown`
 component) defaulting to hide Archive; Repairs' three separate
 ticket#/customer/instrument columns merged into one clickable line;
 replaced the `'Parts Ordered'` status with `'Hold - Parts'` and
-`'Hold - Customer'` (migration: `migrate-parts-ordered-status.sql`, not
-yet run against live); footer version now reflects real commit count via
-`frontend/package.json` instead of a static `"1.0.0"`; New Repair
-Intake's Estimated Cost field defaults to $125, steps by $25, floors at
-$50; renamed "Print Receipt" to "Print Ticket" (button label and the
-Intake submit button text) and moved Repair Detail's action buttons into
-a `.action-bar` flex row so future buttons automatically line up
-alongside Print Ticket / Create Invoice instead of needing manual
-spacing per button.
+`'Hold - Customer'` (migration: `migrate-parts-ordered-status.sql`, now
+confirmed run against live too); footer version now reflects real commit
+count via `frontend/package.json` instead of a static `"1.0.0"`; New
+Repair Intake's Estimated Cost field defaults to $125, steps by $25,
+floors at $50; renamed "Print Receipt" to "Print Ticket" then to "Print
+Repair Ticket" (button label and the Intake submit button text still
+says "...Print Ticket", not "...Print Repair Ticket" -- only the Repair
+Detail link itself was asked to change) and moved Repair Detail's action
+buttons into a `.action-bar` flex row so future buttons automatically
+line up instead of needing manual spacing per button; Create Invoice is
+now only shown when a repair's status is "Ready for Pickup", and
+`POST /api/invoices` is idempotent per repair (previously, clicking
+Create Invoice more than once created a separate duplicate invoice row
+each time -- confirmed by testing, then fixed); invoices are now
+editable (`PUT /api/invoices/:id`) via a click-the-invoice-number edit
+page on the Invoices list, covering name/due_date/payment_status/tax_rate.
 
 ## Recommended way of working on this project going forward
 
