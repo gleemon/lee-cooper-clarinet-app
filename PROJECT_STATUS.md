@@ -31,18 +31,18 @@ any committed file.
 
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
-  method). Confirmed live and up to date as of commit `552ef46` (Parts
-  Inventory tab). **Not yet deployed**: everything after that -- see the
-  "Done" list at the bottom of this file for the full set (Customers/
-  Instruments pages, labor/parts logging, repair status updates, the
-  Repairs page rework, and more). Two migrations need to run against the
-  live DB before redeploying: `migrate-parts-integer-columns.sql` and
-  `migrate-parts-ordered-status.sql` (same pattern as the earlier
-  AUTO_INCREMENT migration). Deliberately holding off on redeploying
-  until the next planned Portainer update session -- there's now a
-  meaningful backlog of undeployed commits, so budget time to smoke-test
-  broadly after the next redeploy rather than assuming a quick check
-  covers it.
+  method). Confirmed live and up to date as of commit `f96658c` (this was
+  redeployed from the other workstation without a PROJECT_STATUS.md
+  update, so don't trust this file's deployment status at face value --
+  cross-check Portainer's `ConfigHash` via the API described below).
+  **Not yet deployed**: just `320d62f` onward (Print Ticket rename,
+  `.action-bar`, Estimated Cost defaults) as of this writing.
+- Both pending migrations have been confirmed **already run** against
+  the live DB (checked via the live API's JSON typing -- `INT` columns
+  come back as bare numbers, `DECIMAL` columns as quoted strings --
+  and by confirming no repair is left with the old `'Parts Ordered'`
+  status): `migrate-parts-integer-columns.sql` and
+  `migrate-parts-ordered-status.sql`. Don't re-run them.
 - MariaDB running in its own container (`lcc-mariadb`) with a named volume
   (`lcc_mariadb_data`) for persistence. The AUTO_INCREMENT schema migration
   has been applied to the live database (see `applied patches/`).
@@ -93,10 +93,14 @@ Source files:
   than left in `docker/init-db/` since it shouldn't run again)
 - `docker/init-db/migrate-parts-integer-columns.sql` — converts
   `quantity_in_stock`/`reorder_level`/`reorder_unit` from
-  `DECIMAL(10,2)` to `INT`. **Not yet run against the live DB.**
+  `DECIMAL(10,2)` to `INT`. **Confirmed already run against the live
+  DB** (verified via the API's JSON typing, 2026-08-26) -- still sitting
+  in `docker/init-db/` rather than `applied patches/`; move it next time
+  this file gets tidied up.
 - `docker/init-db/migrate-parts-ordered-status.sql` — renames the old
-  `'Parts Ordered'` repair status to `'Hold - Parts'`. **Not yet run
-  against the live DB.**
+  `'Parts Ordered'` repair status to `'Hold - Parts'`. **Confirmed
+  already run against the live DB** (verified 2026-08-26, no repair
+  left with the old status) -- same note as above about archiving it.
 
 ## Backend API (backend/server.js)
 
