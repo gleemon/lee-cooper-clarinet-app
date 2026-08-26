@@ -1,6 +1,6 @@
 # Lee Cooper Clarinet — Repair Shop App: Project Status
 
-Last updated: 2026-08-23
+Last updated: 2026-08-26
 
 **Read this file first in any new chat about this project.** It exists so a
 fresh conversation (with no memory of prior chats) can get productive in a
@@ -32,17 +32,17 @@ any committed file.
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
   method). Confirmed live and up to date as of commit `552ef46` (Parts
-  Inventory tab). **Not yet deployed**: everything after that --
-  clickable part-name edit page, integer quantity/reorder columns
-  (needs `migrate-parts-integer-columns.sql` run against the live DB
-  first, same pattern as the AUTO_INCREMENT migration), sortable
-  columns, positive-only reorder field validation, markup shown as a
-  percentage, All Repairs (renamed from Active Repairs, now filterable +
-  sortable), filters added to Inventory/Invoices, and two new pages
-  (Customers, Instruments) with edit forms and their own
-  `GET`/`PUT /api/customers/:id` and `GET`/`PUT /api/instruments/:id`
-  routes. Deliberately holding off on redeploying until the next planned
-  Portainer update session.
+  Inventory tab). **Not yet deployed**: everything after that -- see the
+  "Done" list at the bottom of this file for the full set (Customers/
+  Instruments pages, labor/parts logging, repair status updates, the
+  Repairs page rework, and more). Two migrations need to run against the
+  live DB before redeploying: `migrate-parts-integer-columns.sql` and
+  `migrate-parts-ordered-status.sql` (same pattern as the earlier
+  AUTO_INCREMENT migration). Deliberately holding off on redeploying
+  until the next planned Portainer update session -- there's now a
+  meaningful backlog of undeployed commits, so budget time to smoke-test
+  broadly after the next redeploy rather than assuming a quick check
+  covers it.
 - MariaDB running in its own container (`lcc-mariadb`) with a named volume
   (`lcc_mariadb_data`) for persistence. The AUTO_INCREMENT schema migration
   has been applied to the live database (see `applied patches/`).
@@ -91,6 +91,12 @@ Source files:
   without wiping data (init scripts only run against an empty volume, so
   this had to be run by hand once — already applied, archived here rather
   than left in `docker/init-db/` since it shouldn't run again)
+- `docker/init-db/migrate-parts-integer-columns.sql` — converts
+  `quantity_in_stock`/`reorder_level`/`reorder_unit` from
+  `DECIMAL(10,2)` to `INT`. **Not yet run against the live DB.**
+- `docker/init-db/migrate-parts-ordered-status.sql` — renames the old
+  `'Parts Ordered'` repair status to `'Hold - Parts'`. **Not yet run
+  against the live DB.**
 
 ## Backend API (backend/server.js)
 
@@ -136,6 +142,11 @@ config (`type` is `"string"`, `"number"`, or `"date"`) -- see
 `<select>`, a free-text search `<input>`, both wrapped in a `.filter-bar`
 div) is layered on top where it makes sense, applied before sorting.
 
+Nav: Dashboard, Repairs, Invoices, Inventory, Customers, Instruments.
+There's no separate "New Repair" nav item -- the Dashboard's
+"+ New Repair Intake" button navigates to the intake page directly (it
+used to do nothing; fixed alongside dropping the redundant nav entry).
+
 Pages: Dashboard (mostly a stub), New Repair Intake (wired to
 `POST /api/repairs/intake`; has independent customer and instrument
 pickers, both shop-wide via `GET /api/customers` and `GET /api/instruments`
@@ -143,28 +154,35 @@ pickers, both shop-wide via `GET /api/customers` and `GET /api/instruments`
 instrument lookup isn't scoped to the selected customer. Each falls back to
 "+ New Customer" / "+ New Instrument" fields; new-instrument creation now
 captures make/model/serial/purchase date/purchase cost/valuation, not just
-type), All Repairs (renamed from "Active Repairs" -- shows every repair
-regardless of status by default; filterable by status and free-text search
-across customer/instrument/title; sortable columns; clicking the ticket
-number opens the repair detail page), Repair Detail (status is a
-dropdown -- picking a value saves immediately via
-`PUT /api/repairs/:id/status`; shows customer/instrument/billing, links
-to Print Receipt and Create Invoice, and has Work Log / Parts Used
-sections with their own "+ Log Work" / "+ Add Part Used" forms --
-logging work needs hours and optionally a technician/description/billable
-flag; logging a part picks from inventory (auto-suggests customer cost
-from reorder_cost × markup, editable) or falls back to a free-text
-description for anything not in inventory, and decrements the part's
-stock. Every row's date is clickable (the same `.link-btn` pattern used
-elsewhere) to reopen that same form pre-filled for editing -- editing a
-parts-used entry reconciles inventory correctly even if the quantity or
-the part itself changes. All of this refreshes the billing totals
-immediately on save), Invoices (sortable columns; filterable by payment status and
-free-text search across customer/repair; links to each invoice's PDF),
-Inventory (sortable columns; filterable by category, vendor, and free-text
-search; a "Low Stock" flag when quantity_in_stock <= reorder_level; markup
-shown as a percentage; a "Receive Parts" form -- pick an existing part to
-add received quantity to its stock, or "+ New Part" to create one, with a
+type; Estimated Cost defaults to $125, steps by $25, floors at $50), Repairs
+(renamed twice now -- "Active Repairs" → "All Repairs" → "Repairs" -- shows
+every status except Archive by default; the status filter is a multi-select
+dropdown (`MultiSelectDropdown`, a shared component: closes on outside
+click or Escape, trigger button summarizes the selection as "All
+Statuses"/one name/"N selected") plus free-text search across
+customer/instrument/title; sortable columns; each row is a single
+clickable line -- ticket # — customer — instrument -- instead of three
+separate columns), Repair Detail (status is a dropdown -- picking a value
+saves immediately via `PUT /api/repairs/:id/status`; shows
+customer/instrument/billing; action buttons (Print Ticket, Create
+Invoice, and anything added later) live in a `.action-bar` flex-row
+container so they always line up in one row instead of needing manual
+spacing per button; has Work Log / Parts Used sections with their own
+"+ Log Work" / "+ Add Part Used" forms -- logging work needs hours and
+optionally a technician/description/billable flag; logging a part picks
+from inventory (auto-suggests customer cost from reorder_cost × markup,
+editable) or falls back to a free-text description for anything not in
+inventory, and decrements the part's stock. Every row's date is clickable
+(the same `.link-btn` pattern used elsewhere) to reopen that same form
+pre-filled for editing -- editing a parts-used entry reconciles inventory
+correctly even if the quantity or the part itself changes. All of this
+refreshes the billing totals immediately on save), Invoices (sortable
+columns; filterable by payment status and free-text search across
+customer/repair; links to each invoice's PDF), Inventory (sortable
+columns; filterable by category, vendor, and free-text search; a "Low
+Stock" flag when quantity_in_stock <= reorder_level; markup shown as a
+percentage; a "Receive Parts" form -- pick an existing part to add
+received quantity to its stock, or "+ New Part" to create one, with a
 "+ New Vendor" fallback if the vendor isn't in the system yet either;
 clicking a part name opens an edit page for its full record), Customers
 (sortable columns; free-text search across name/email/phone; clicking a
@@ -174,10 +192,23 @@ by owner (including "No Owner") and free-text search across
 name/type/make/model/serial; clicking a name opens an edit page, including
 reassigning the owner, via `GET`/`PUT /api/instruments/:id`).
 
-The footer also shows the running build's version + short git commit hash
-(`__APP_VERSION__` / `__COMMIT_HASH__`, both Vite `define`s computed in
-`frontend/vite.config.js`), so it's obvious from the live site which commit
-is actually deployed.
+`fmtDate()` parses the `YYYY-MM-DD` prefix of a date string directly
+rather than going through `new Date(...).toLocaleDateString()` -- the
+latter treats a date-only string as UTC midnight and rolls it back a day
+for anyone west of UTC. Affects every date shown in the app; worth
+remembering if a new date-formatting helper ever gets added elsewhere.
+
+The footer shows the running build's version + short git commit hash.
+Version comes from `frontend/package.json`'s `"version"` field
+(`__APP_VERSION__`, convention: `1.<total commit count as of that
+commit>.0`, bumped by hand as part of every commit) rather than computed
+from git at build time, since the Docker build deliberately has no
+`.git` available (see "Known issues" below) and a static `"1.0.0"` was
+never useful. The commit hash (`__COMMIT_HASH__`) still comes from `git
+rev-parse --short HEAD` where available, falling back to `"unknown"` in
+the Docker image. Both are Vite `define`s computed in
+`frontend/vite.config.js`, so it's obvious from the live site which
+commit is actually deployed.
 
 ## Known issues, gotchas, and their fixes
 
@@ -211,7 +242,7 @@ is actually deployed.
 ## Immediate next steps (in order)
 
 1. **Email customers when a repair is done.** A "Notify Customer" button
-   on the Repair Detail page (next to Print Receipt / Create Invoice),
+   in Repair Detail's `.action-bar` (next to Print Ticket / Create Invoice),
    triggered manually rather than automatically on status change, so
    nothing gets emailed by accident while someone's just editing a
    ticket. Planned approach: `nodemailer` over SMTP using the shop's
@@ -270,6 +301,23 @@ Repair Detail page, closing the gap that meant every receipt/invoice
 used to total $0, and repair status updates --
 `PUT /api/repairs/:id/status`, a dropdown on Repair Detail, auto-stamps
 `completion_date` the first time a repair is marked Complete.
+
+Also done since: fixed the `fmtDate()` off-by-one bug (see "Frontend"
+above); wired the dead Dashboard "+ New Repair Intake" button and
+dropped the now-redundant "New Repair" nav item; Repairs' status filter
+is now a multi-select dropdown (new shared `MultiSelectDropdown`
+component) defaulting to hide Archive; Repairs' three separate
+ticket#/customer/instrument columns merged into one clickable line;
+replaced the `'Parts Ordered'` status with `'Hold - Parts'` and
+`'Hold - Customer'` (migration: `migrate-parts-ordered-status.sql`, not
+yet run against live); footer version now reflects real commit count via
+`frontend/package.json` instead of a static `"1.0.0"`; New Repair
+Intake's Estimated Cost field defaults to $125, steps by $25, floors at
+$50; renamed "Print Receipt" to "Print Ticket" (button label and the
+Intake submit button text) and moved Repair Detail's action buttons into
+a `.action-bar` flex row so future buttons automatically line up
+alongside Print Ticket / Create Invoice instead of needing manual
+spacing per button.
 
 ## Recommended way of working on this project going forward
 

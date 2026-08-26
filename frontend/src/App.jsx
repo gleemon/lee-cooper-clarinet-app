@@ -265,7 +265,7 @@ function IntakePage({ onCreated }) {
     instrumentPurchaseCost: "",
     instrumentValuation: "",
     issueDescription: "",
-    estimatedCost: ""
+    estimatedCost: "125"
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -330,7 +330,7 @@ function IntakePage({ onCreated }) {
         instrumentPurchaseCost: "",
         instrumentValuation: "",
         issueDescription: "",
-        estimatedCost: ""
+        estimatedCost: "125"
       });
       setCustomerId("");
       setInstrumentId("");
@@ -495,11 +495,12 @@ function IntakePage({ onCreated }) {
             name="estimatedCost"
             value={formData.estimatedCost}
             onChange={handleChange}
-            step="0.01"
+            step="25"
+            min="50"
           />
         </div>
         <button type="submit" className="btn-primary" disabled={submitting}>
-          {submitting ? "Creating..." : "Create Repair & Print Receipt"}
+          {submitting ? "Creating..." : "Create Repair & Print Ticket"}
         </button>
       </form>
     </section>
@@ -768,15 +769,14 @@ function RepairDetailPage({ repairId, onBack }) {
         </div>
       </div>
 
-      <div className="form-group" style={{ marginTop: "1.5rem" }}>
+      <div className="action-bar">
         <a
           className="btn-primary"
           href={`${API_URL}/api/repairs/${repairId}/receipt.pdf`}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ marginRight: "0.75rem", display: "inline-block", textDecoration: "none" }}
         >
-          Print Receipt
+          Print Ticket
         </a>
         <button className="btn-primary" onClick={handleCreateInvoice} disabled={creatingInvoice}>
           {creatingInvoice ? "Creating..." : "Create Invoice"}
