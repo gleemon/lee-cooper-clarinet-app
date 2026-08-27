@@ -31,12 +31,11 @@ any committed file.
 
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
-  method). Confirmed live as of commit `f91a731` (redeployed 2026-08-26
-  via the Portainer API method below). **Not yet deployed**: the
-  invoice/ticket changes from later the same day -- Print Repair Ticket
-  rename, conditional Create Invoice button, idempotent invoice
-  creation, and invoice editing (see "Done" list at the bottom for the
-  full set). This file has been caught by surprise twice now by
+  method). Confirmed live and up to date as of commit `fe547ac`
+  (checked 2026-08-27) -- this includes everything in the "Done" list
+  at the bottom of this file: Print Repair Ticket rename, conditional
+  Create Invoice button, idempotent invoice creation, and invoice
+  editing. This file has been caught by surprise more than once now by
   redeploys/migrations done without a PROJECT_STATUS.md update -- treat
   this section as a claim to verify, not a fact, and cross-check
   Portainer's `ConfigHash` via the API before assuming what's live.
