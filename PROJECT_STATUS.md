@@ -255,6 +255,63 @@ commit is actually deployed.
   Docker image just shows "unknown" while local `npm run build` (outside
   Docker) still shows the real hash.
 
+## Planned: Accounting system (discussed 2026-08-27, NOT STARTED --
+## do not build any of this without explicit go-ahead)
+
+The app currently only tracks repair-shop revenue, and even that is just
+a `payment_status` flag on invoices, not a real payment record. The user
+wants to record all business income (repairs, gigs, private lessons) and
+expenses (inventory costs, etc.) well enough to hand an accountant a
+Schedule C-style income/expense report. Decided during discussion:
+cash-basis single-entry ledger, not full double-entry bookkeeping (a
+`transactions` table with type/category/amount/date/payee, not a chart
+of accounts) -- matches the actual need without the complexity of real
+double-entry accounting.
+
+Decisions locked in:
+- Gig payment sources: a managed list with autocomplete (not free text),
+  so recurring venues/clients get consistent naming for reporting.
+- Lesson students: reuse the existing `customers` table, no separate
+  student list.
+- Reporting: Schedule C-style income/expense report, categorized for
+  handing to an accountant.
+- Invoice payments: upgrade from the current status flag to a real
+  payment system (amount, date, method; supports partial payments).
+
+**V1 build order** (see conversation for full reasoning on the sequencing):
+1. Transactions ledger foundation -- `transactions` table (date, type
+   income/expense, category, amount, source/payee, payment method,
+   notes) plus a basic entry form and list. Nothing else works without
+   this.
+2. Real invoice payment system -- replaces `payment_status` with actual
+   payment records; each recorded payment also writes a linked
+   transaction, so repair-shop revenue flows into the same ledger
+   instead of being a separate silo.
+3. Gig income entry -- a `payment_sources` list for the autocomplete,
+   plus a quick entry form. Highest-value item with the least
+   dependency, since gig income currently has zero support.
+4. Inventory cost logging -- add an optional "amount actually paid"
+   field to the existing Receive Parts flow (defaults to
+   `reorder_cost × quantity`, editable), logging an expense transaction.
+   Lowest urgency of the four; benefits from categories already being
+   settled by steps 1-3.
+5. Schedule C-style income/expense report -- built last on purpose, once
+   real data is flowing in from repairs/gigs/inventory so the category
+   groupings are informed by actual usage instead of guessed up front.
+
+**V2** (deferred, not yet designed in detail):
+- **Private lessons**: a quick-entry page to log a lesson taught (pick
+  student from `customers`, date defaults today, rate defaults to that
+  student's usual) and mark it paid (creates a linked ledger
+  transaction, same pattern as invoice payments). Depends only on the
+  V1 ledger, so it can slot in whenever without disrupting the order
+  above.
+- **Lending library**: track shop-owned/loaner instruments (the
+  `instruments` rows with no `owner_customer_id`, e.g. "Shop Use Only")
+  being loaned out to customers/students -- loan date, expected/actual
+  return date, condition notes. Not yet scoped in detail; flagged here
+  so it isn't lost.
+
 ## Immediate next steps (in order)
 
 1. **Email customers when a repair is done.** A "Notify Customer" button
