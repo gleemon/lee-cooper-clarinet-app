@@ -67,12 +67,14 @@ any committed file.
 
 ## Database schema
 
-11 tables, mirroring the real Notion structure (not a guess — pulled
-directly from the Notion workspace via its API):
+11 tables mirror the real Notion structure (not a guess — pulled directly
+from the Notion workspace via its API), plus one new table not from Notion:
 
 `customers`, `technicians`, `parts_vendors`, `instruments`,
 `parts_inventory`, `repairs`, `invoices`, `work_log`, `parts_used`,
-`repair_tags`, `receipts`.
+`repair_tags`, `receipts`, and `transactions` (V1 of the accounting
+system -- see "Planned: Accounting system"; not Notion-derived, added
+2026-09-07).
 
 Every table's `id` column is `AUTO_INCREMENT`. Tables migrated from Notion
 (customers, technicians, parts_vendors, instruments, parts_inventory,
@@ -103,6 +105,9 @@ Source files:
   `'Parts Ordered'` repair status to `'Hold - Parts'`. **Confirmed
   already run against the live DB** (verified 2026-08-26, no repair
   left with the old status) -- same note as above about archiving it.
+- `docker/init-db/migrate-add-transactions-table.sql` — creates the new
+  `transactions` table. **NOT yet run against the live DB** -- applied
+  locally only so far (2026-09-07).
 
 ## Backend API (backend/server.js)
 
@@ -123,6 +128,8 @@ Source files:
 - `POST /api/parts` — create a part (and its vendor too, if new)
 - `PUT /api/parts/:id` — update every field on an existing part (replaces quantity_in_stock, unlike /receive)
 - `POST /api/parts/:id/receive` — add received quantity to an existing part's stock
+- `GET /api/transactions`, `POST /api/transactions` — the accounting ledger (V1, see "Planned: Accounting system"); not yet linked to invoice payments
+- `GET /api/transactions/categories`, `GET /api/transactions/payees` — distinct values already in use, for the entry form's `<datalist>` suggestions (category is paired with `type` so suggestions can be narrowed to income vs. expense)
 
 Billing math lives in `backend/services/billing.js` and mirrors the
 formulas that used to live in Notion's rollup/formula fields: Labor Cost =
@@ -150,7 +157,7 @@ config (`type` is `"string"`, `"number"`, or `"date"`) -- see
 `<select>`, a free-text search `<input>`, both wrapped in a `.filter-bar`
 div) is layered on top where it makes sense, applied before sorting.
 
-Nav: Dashboard, Repairs, Invoices, Inventory, Customers, Instruments.
+Nav: Dashboard, Repairs, Invoices, Inventory, Customers, Instruments, Ledger.
 There's no separate "New Repair" nav item -- the Dashboard's
 "+ New Repair Intake" button navigates to the intake page directly (it
 used to do nothing; fixed alongside dropping the redundant nav entry).
@@ -206,7 +213,21 @@ name opens an edit page for the full record via
 `GET`/`PUT /api/customers/:id`), Instruments (sortable columns; filterable
 by owner (including "No Owner") and free-text search across
 name/type/make/model/serial; clicking a name opens an edit page, including
-reassigning the owner, via `GET`/`PUT /api/instruments/:id`).
+reassigning the owner, via `GET`/`PUT /api/instruments/:id`), Ledger
+(V1 of the accounting system's transactions table -- see "Planned:
+Accounting system"; a plain income/expense list, not yet linked to
+invoice payments. `category` and `payee` are free text with no lookup
+table -- `<datalist>` suggests values already in use, via
+`GET /api/transactions/categories`/`payees`, but typing a new one is
+just as valid; category suggestions narrow to the currently-selected
+income/expense side. Filterable by type and category, plus free-text
+search across payee/notes; sortable columns; three summary cards
+(Income/Expenses/Net) recompute from whatever's currently filtered, not
+the full unfiltered set).
+
+`fmtMoney()` puts the sign before the `$` for a negative amount
+(`-$45.99`, not `$-45.99`) -- only surfaced once the ledger's Net figure
+introduced the first negative amount it ever had to format.
 
 `fmtDate()` parses the `YYYY-MM-DD` prefix of a date string directly
 rather than going through `new Date(...).toLocaleDateString()` -- the
@@ -255,8 +276,9 @@ commit is actually deployed.
   Docker image just shows "unknown" while local `npm run build` (outside
   Docker) still shows the real hash.
 
-## Planned: Accounting system (discussed 2026-08-27, NOT STARTED --
-## do not build any of this without explicit go-ahead)
+## Planned: Accounting system (discussed 2026-08-27; step 1 built
+## 2026-09-07 -- steps 2-5 below are still NOT STARTED, do not build
+## any of that without explicit go-ahead)
 
 The app currently only tracks repair-shop revenue, and even that is just
 a `payment_status` flag on invoices, not a real payment record. The user
@@ -269,8 +291,13 @@ of accounts) -- matches the actual need without the complexity of real
 double-entry accounting.
 
 Decisions locked in:
-- Gig payment sources: a managed list with autocomplete (not free text),
-  so recurring venues/clients get consistent naming for reporting.
+- Categories and payees (vendors for expenses, income sources like a gig
+  venue): create-on-the-fly free text, not a managed lookup list --
+  supersedes an earlier plan to use a strict managed list for gig
+  payment sources. `<datalist>` suggests whatever's already in
+  `transactions` (via `GET /api/transactions/categories`/`payees`), but
+  typing a brand new value is just as valid; no separate
+  categories/vendors table.
 - Lesson students: reuse the existing `customers` table, no separate
   student list.
 - Reporting: Schedule C-style income/expense report, categorized for
@@ -279,10 +306,16 @@ Decisions locked in:
   payment system (amount, date, method; supports partial payments).
 
 **V1 build order** (see conversation for full reasoning on the sequencing):
-1. Transactions ledger foundation -- `transactions` table (date, type
-   income/expense, category, amount, source/payee, payment method,
-   notes) plus a basic entry form and list. Nothing else works without
-   this.
+1. **DONE (2026-09-07).** Transactions ledger foundation -- `transactions`
+   table (`transaction_date`, `type` income/expense, `category`, `amount`,
+   `payee`, `notes`; no `payment_method` column -- wasn't requested for
+   this basic pass and can be added later) plus a Ledger nav page: entry
+   form (`POST /api/transactions`) and a sortable/filterable list
+   (`GET /api/transactions`) with Income/Expenses/Net summary cards that
+   recompute from whatever's currently filtered. **Deliberately excludes
+   invoice payments** (step 2 below) per explicit instruction. Not yet
+   deployed to the live DB -- see `migrate-add-transactions-table.sql` in
+   "Database schema" above.
 2. Real invoice payment system -- replaces `payment_status` with actual
    payment records; each recorded payment also writes a linked
    transaction, so repair-shop revenue flows into the same ledger

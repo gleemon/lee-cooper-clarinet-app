@@ -161,3 +161,21 @@ CREATE TABLE receipts (
   repair_id INT,
   FOREIGN KEY (repair_id) REFERENCES repairs(id) ON DELETE SET NULL
 );
+
+-- V1 of the accounting system (see PROJECT_STATUS.md "Planned: Accounting
+-- system"): a cash-basis single-entry ledger, not a chart of accounts.
+-- category and payee are deliberately plain text rather than foreign keys
+-- to lookup tables -- the app supports "pick an existing value or type a
+-- new one" by suggesting DISTINCT values already in this table, so no
+-- separate categories/vendors table is needed. Not yet linked to invoice
+-- payments (repairs/invoices) -- that's a later step in the plan.
+CREATE TABLE transactions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  type VARCHAR(20) NOT NULL,              -- income, expense
+  category VARCHAR(100) NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  payee VARCHAR(255),                     -- vendor (expense) or income source, e.g. a gig venue
+  transaction_date DATE NOT NULL,
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

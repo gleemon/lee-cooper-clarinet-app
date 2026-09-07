@@ -904,6 +904,82 @@ app.post("/api/parts/:id/receive", async (req, res) => {
   }
 });
 
+// Transactions ledger (V1 of the accounting system -- see PROJECT_STATUS.md
+// "Planned: Accounting system"). Not yet linked to invoice payments.
+const TRANSACTION_TYPES = ["income", "expense"];
+
+app.get("/api/transactions", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query(
+      "SELECT * FROM transactions ORDER BY transaction_date DESC, id DESC"
+    );
+    conn.release();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Distinct categories already in use, so the entry form can suggest them
+// (type is included so the frontend can narrow suggestions to the side --
+// income/expense -- currently being entered).
+app.get("/api/transactions/categories", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query(
+      "SELECT DISTINCT category, type FROM transactions ORDER BY category ASC"
+    );
+    conn.release();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Distinct payees already in use (vendors for expenses, income sources like
+// a gig venue), so the entry form can suggest them too.
+app.get("/api/transactions/payees", async (req, res) => {
+  try {
+    const conn = await pool.getConnection();
+    const [rows] = await conn.query(
+      "SELECT DISTINCT payee FROM transactions WHERE payee IS NOT NULL AND payee != '' ORDER BY payee ASC"
+    );
+    conn.release();
+    res.json(rows.map((r) => r.payee));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/transactions", async (req, res) => {
+  try {
+    const { type, category, amount, payee, transactionDate, notes } = req.body;
+    if (!TRANSACTION_TYPES.includes(type)) {
+      return res.status(400).json({ error: `type must be one of: ${TRANSACTION_TYPES.join(", ")}` });
+    }
+    if (!category) {
+      return res.status(400).json({ error: "category is required" });
+    }
+    const amountNum = parseFloat(amount);
+    if (!amountNum || amountNum <= 0) {
+      return res.status(400).json({ error: "amount must be a positive number" });
+    }
+    if (!transactionDate) {
+      return res.status(400).json({ error: "transactionDate is required" });
+    }
+    const conn = await pool.getConnection();
+    const [result] = await conn.query(
+      "INSERT INTO transactions (type, category, amount, payee, transaction_date, notes) VALUES (?, ?, ?, ?, ?, ?)",
+      [type, category, amountNum, payee || null, transactionDate, notes || null]
+    );
+    conn.release();
+    res.json({ id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Hand any other GET request back to the React app (client-side routing fallback)
 app.get(/^\/(?!api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));

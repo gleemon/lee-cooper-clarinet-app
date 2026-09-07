@@ -202,6 +202,12 @@ export default function App() {
         >
           Instruments
         </button>
+        <button
+          className={`nav-btn ${currentPage === "ledger" ? "active" : ""}`}
+          onClick={() => setCurrentPage("ledger")}
+        >
+          Ledger
+        </button>
       </nav>
 
       <main className="main-content">
@@ -220,6 +226,7 @@ export default function App() {
         {currentPage === "inventory" && <InventoryPage />}
         {currentPage === "customers" && <CustomersPage />}
         {currentPage === "instruments" && <InstrumentsPage />}
+        {currentPage === "ledger" && <LedgerPage />}
       </main>
 
       <footer className="footer">
@@ -633,7 +640,13 @@ function fmtDate(d) {
 function fmtMoney(n) {
   if (n === null || n === undefined || n === "") return "--";
   const v = parseFloat(n);
-  return isNaN(v) ? "--" : `$${v.toFixed(2)}`;
+  if (isNaN(v)) return "--";
+  // Sign goes before the $, not after it -- v.toFixed(2) on a negative
+  // number already includes the "-", so `$${v.toFixed(2)}` would read
+  // "$-45.99" instead of "-$45.99" (only surfaced once the ledger's Net
+  // figure introduced the first negative amount fmtMoney ever had to
+  // format).
+  return v < 0 ? `-$${Math.abs(v).toFixed(2)}` : `$${v.toFixed(2)}`;
 }
 
 // markup is stored as a cost multiplier (1.10 = 10% markup) but shown to
@@ -2349,5 +2362,282 @@ function InstrumentEditPage({ instrumentId, customers, onBack, onSaved }) {
         </button>
       </form>
     </section>
+  );
+}
+
+const TRANSACTION_TYPES = ["income", "expense"];
+
+const TRANSACTION_COLUMNS = [
+  { key: "transaction_date", label: "Date", type: "date" },
+  { key: "type", label: "Type", type: "string" },
+  { key: "category", label: "Category", type: "string" },
+  { key: "payee", label: "Payee", type: "string" },
+  { key: "amount", label: "Amount", type: "number" }
+];
+
+// V1 of the accounting system (see PROJECT_STATUS.md "Planned: Accounting
+// system"): a plain income/expense ledger, not yet linked to invoice
+// payments. category and payee are free text -- GET /api/transactions/{categories,payees}
+// return whatever's already in use so TransactionForm can suggest them via
+// <datalist>, but typing a new value is just as valid (no separate
+// categories/vendors table to manage).
+function LedgerPage() {
+  const [transactions, setTransactions] = useState([]);
+  const [categories, setCategories] = useState([]); // [{category, type}]
+  const [payees, setPayees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const { sortField, sortDirection, handleSort } = useSort("transaction_date", "desc");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [search, setSearch] = useState("");
+
+  const fetchAll = () => {
+    setLoading(true);
+    Promise.all([
+      axios.get(`${API_URL}/api/transactions`),
+      axios.get(`${API_URL}/api/transactions/categories`),
+      axios.get(`${API_URL}/api/transactions/payees`)
+    ])
+      .then(([txRes, catRes, payeeRes]) => {
+        setTransactions(txRes.data);
+        setCategories(catRes.data);
+        setPayees(payeeRes.data);
+      })
+      .catch((err) => console.error("Error fetching ledger data:", err))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchAll();
+  }, []);
+
+  const categoryOptions = [...new Set(categories.map((c) => c.category))].sort();
+
+  const filtered = transactions.filter((t) => {
+    if (typeFilter && t.type !== typeFilter) return false;
+    if (categoryFilter && t.category !== categoryFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const haystack = `${t.payee || ""} ${t.notes || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sorted = sortRows(filtered, TRANSACTION_COLUMNS, sortField, sortDirection);
+
+  const totals = filtered.reduce(
+    (acc, t) => {
+      const amt = parseFloat(t.amount) || 0;
+      if (t.type === "income") acc.income += amt;
+      else if (t.type === "expense") acc.expense += amt;
+      return acc;
+    },
+    { income: 0, expense: 0 }
+  );
+
+  return (
+    <section className="page">
+      <h2>Ledger</h2>
+      <button className="btn-primary" style={{ marginBottom: "1.5rem" }} onClick={() => setShowForm((s) => !s)}>
+        {showForm ? "Cancel" : "+ Add Transaction"}
+      </button>
+
+      {showForm && (
+        <TransactionForm
+          categories={categories}
+          payees={payees}
+          onSaved={() => {
+            setShowForm(false);
+            fetchAll();
+          }}
+        />
+      )}
+
+      {transactions.length > 0 && (
+        <>
+          <div className="filter-bar">
+            <div className="form-group">
+              <label>Type</label>
+              <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                <option value="">All Types</option>
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Category</label>
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option value="">All Categories</option>
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Search</label>
+              <input
+                type="text"
+                placeholder="Payee or notes..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="dashboard-grid" style={{ marginBottom: "1.5rem" }}>
+            <div className="card">
+              <h3>Income</h3>
+              <p className="ledger-amount ledger-income">{fmtMoney(totals.income)}</p>
+            </div>
+            <div className="card">
+              <h3>Expenses</h3>
+              <p className="ledger-amount ledger-expense">{fmtMoney(totals.expense)}</p>
+            </div>
+            <div className="card">
+              <h3>Net</h3>
+              <p className={`ledger-amount ${totals.income - totals.expense >= 0 ? "ledger-income" : "ledger-expense"}`}>
+                {fmtMoney(totals.income - totals.expense)}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {loading ? (
+        <p>Loading...</p>
+      ) : transactions.length === 0 ? (
+        <p>No transactions yet.</p>
+      ) : sorted.length === 0 ? (
+        <p>No transactions match this filter.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <SortableHeaderRow
+              columns={TRANSACTION_COLUMNS}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
+          </thead>
+          <tbody>
+            {sorted.map((t) => (
+              <tr key={t.id}>
+                <td>{fmtDate(t.transaction_date)}</td>
+                <td>
+                  <span className={`status-badge ${t.type === "income" ? "ledger-income-badge" : "ledger-expense-badge"}`}>
+                    {t.type === "income" ? "Income" : "Expense"}
+                  </span>
+                </td>
+                <td>{t.category}</td>
+                <td>{t.payee || "--"}</td>
+                <td className={t.type === "income" ? "ledger-income" : "ledger-expense"}>
+                  {t.type === "income" ? "+" : "-"}{fmtMoney(t.amount)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+function TransactionForm({ categories, payees, onSaved }) {
+  const [formData, setFormData] = useState({
+    type: "expense",
+    category: "",
+    amount: "",
+    payee: "",
+    transactionDate: new Date().toISOString().slice(0, 10),
+    notes: ""
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const categorySuggestions = [
+    ...new Set(categories.filter((c) => c.type === formData.type).map((c) => c.category))
+  ].sort();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.post(`${API_URL}/api/transactions`, formData);
+      onSaved();
+    } catch (err) {
+      console.error("Error creating transaction:", err);
+      setError(err.response?.data?.error || "Could not save this transaction.");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="form" style={{ marginBottom: "2rem" }}>
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-group">
+        <label>Type *</label>
+        <select name="type" value={formData.type} onChange={handleChange}>
+          {TRANSACTION_TYPES.map((t) => (
+            <option key={t} value={t}>{t === "income" ? "Income" : "Expense"}</option>
+          ))}
+        </select>
+      </div>
+      <div className="form-group">
+        <label>Category *</label>
+        <input
+          type="text"
+          name="category"
+          list="category-suggestions"
+          value={formData.category}
+          onChange={handleChange}
+          placeholder="Choose existing or type a new one"
+          required
+        />
+        <datalist id="category-suggestions">
+          {categorySuggestions.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+      </div>
+      <div className="form-group">
+        <label>Amount *</label>
+        <input type="number" name="amount" value={formData.amount} onChange={handleChange} step="0.01" min="0" required />
+      </div>
+      <div className="form-group">
+        <label>{formData.type === "income" ? "Source" : "Vendor"}</label>
+        <input
+          type="text"
+          name="payee"
+          list="payee-suggestions"
+          value={formData.payee}
+          onChange={handleChange}
+          placeholder="Choose existing or type a new one"
+        />
+        <datalist id="payee-suggestions">
+          {payees.map((p) => (
+            <option key={p} value={p} />
+          ))}
+        </datalist>
+      </div>
+      <div className="form-group">
+        <label>Date *</label>
+        <input type="date" name="transactionDate" value={formData.transactionDate} onChange={handleChange} required />
+      </div>
+      <div className="form-group">
+        <label>Notes</label>
+        <textarea name="notes" value={formData.notes} onChange={handleChange} rows="3"></textarea>
+      </div>
+      <button type="submit" className="btn-primary" disabled={submitting}>
+        {submitting ? "Saving..." : "Add Transaction"}
+      </button>
+    </form>
   );
 }

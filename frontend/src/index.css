@@ -355,6 +355,29 @@ body {
   color: #1976d2;
 }
 
+.ledger-amount {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.ledger-income {
+  color: #2e7d32;
+}
+
+.ledger-expense {
+  color: #c0392b;
+}
+
+.ledger-income-badge {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.ledger-expense-badge {
+  background-color: #fdecea;
+  color: #c0392b;
+}
+
 @media (max-width: 768px) {
   .header-content h1 {
     font-size: 1.75rem;
