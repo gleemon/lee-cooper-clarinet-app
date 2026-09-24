@@ -1,6 +1,6 @@
 # Lee Cooper Clarinet — Repair Shop App: Project Status
 
-Last updated: 2026-08-26
+Last updated: 2026-09-23
 
 **Read this file first in any new chat about this project.** It exists so a
 fresh conversation (with no memory of prior chats) can get productive in a
@@ -93,16 +93,16 @@ Source files:
   without wiping data (init scripts only run against an empty volume, so
   this had to be run by hand once — already applied, archived here rather
   than left in `docker/init-db/` since it shouldn't run again)
-- `docker/init-db/migrate-parts-integer-columns.sql` — converts
-  `quantity_in_stock`/`reorder_level`/`reorder_unit` from
-  `DECIMAL(10,2)` to `INT`. **Confirmed already run against the live
-  DB** (verified via the API's JSON typing, 2026-08-26) -- still sitting
-  in `docker/init-db/` rather than `applied patches/`; move it next time
-  this file gets tidied up.
-- `docker/init-db/migrate-parts-ordered-status.sql` — renames the old
-  `'Parts Ordered'` repair status to `'Hold - Parts'`. **Confirmed
-  already run against the live DB** (verified 2026-08-26, no repair
-  left with the old status) -- same note as above about archiving it.
+- `docker/init-db/migrate-add-repair-notes.sql`,
+  `migrate-parts-integer-columns.sql`, `migrate-parts-ordered-status.sql`
+  — all three already applied to live and already baked into
+  `01-schema.sql`/`02-seed-data.sql`. **They must be moved to
+  `applied patches/`, not just for tidiness:** every `.sql` file in
+  `docker/init-db/` runs on a fresh volume, and
+  `migrate-add-repair-notes.sql` isn't idempotent -- tested 2026-09-23
+  in a throwaway container, a from-scratch install fails with
+  `Duplicate column name 'notes'` and MariaDB exits. See "Code review
+  findings" below (item 1).
 
 ## Backend API (backend/server.js)
 
@@ -254,6 +254,58 @@ commit is actually deployed.
   already falls back to `"unknown"` when git isn't available, so the
   Docker image just shows "unknown" while local `npm run build` (outside
   Docker) still shows the real hash.
+
+## Code review findings (2026-09-23, NOT STARTED)
+
+From a full codebase review. Suggested order: 1-2 first (small, and both
+can take the app down), then 3-4, then 7-9 as one cleanup commit; 12
+before starting accounting V1; 10-11 whenever there's a quiet stretch.
+
+**Fix soon (real bugs):**
+1. **Fresh installs are broken.** `migrate-add-repair-notes.sql` in
+   `docker/init-db/` re-adds a column `01-schema.sql` already creates;
+   on an empty volume MariaDB exits with `Duplicate column name
+   'notes'` (verified in a throwaway container). Live/local are fine
+   only because their volumes already exist. Fix: move all three
+   `migrate-*.sql` files to `applied patches/`.
+2. **DB connection leak can hang the app.** ~35 handlers in
+   `server.js` call `pool.getConnection()` and `release()` inside the
+   `try`, so a query error never returns the connection. Pool is 10
+   connections with an unlimited queue -- ten failed queries and every
+   later request hangs until restart. Fix: `pool.query()` for
+   single-statement handlers, `finally { conn.release() }` for the
+   transactional ones (the 5 transactional handlers already do this).
+3. **Invoice duplicates still possible under concurrency.** "One
+   invoice per repair" is a check-then-insert in code only; add
+   `UNIQUE (repair_id)` on `invoices` -- after checking live for
+   existing duplicates first.
+
+**Security (fine on the LAN, worth tightening):**
+4. MariaDB is published on the NUC's LAN at port 3307
+   (`docker-compose.yml`); the app doesn't need it. Remove, or bind to
+   `127.0.0.1:3307:3306`.
+5. 29 handlers return raw `err.message` to the browser -- log
+   server-side, send a generic message.
+6. No auth (fine while LAN-only). Note `scripts/dev-against-nuc.sh`
+   points local dev at **live** data.
+
+**Maintenance:**
+7. `node:18-alpine` in the Dockerfile is end-of-life (April 2025) --
+   move to `node:22-alpine` (build already warns a dependency needs
+   Node 20+).
+8. Dead code/deps: `POST /api/customers` and `POST /api/repairs` have no
+   callers; `axios` unused in backend; `tailwindcss`/`postcss`/
+   `autoprefixer` unused in frontend; root `npm run build` calls a
+   backend `build` script that doesn't exist.
+9. `.env.example` is stale (lists `REACT_APP_API_URL`/`NOTION_API_KEY`,
+   omits the `REPAIR_DB_*` vars docker-compose needs, has a stray BOM).
+10. `App.jsx` is ~2,350 lines -- split into `pages/`/`components/`
+    (no behaviour change).
+11. No automated tests -- start with `billing.js` math, parts-used
+    inventory reconciliation, and invoice idempotency.
+12. No migration system -- a numbered migrations folder plus a
+    `schema_migrations` table would settle "has this run on live?"
+    without inference. Do this before the accounting tables arrive.
 
 ## Planned: Accounting system (discussed 2026-08-27, NOT STARTED --
 ## do not build any of this without explicit go-ahead)
