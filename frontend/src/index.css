@@ -78,6 +78,36 @@ body {
   font-weight: 600;
 }
 
+.subnav {
+  background-color: #f9f9fc;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 2rem;
+}
+
+.subnav-btn {
+  padding: 0.4rem 1rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #666;
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.subnav-btn:hover {
+  background-color: #eceefb;
+  color: #333;
+}
+
+.subnav-btn.active {
+  background-color: #667eea;
+  color: white;
+  font-weight: 600;
+}
+
 .main-content {
   flex: 1;
   padding: 2rem;
@@ -391,6 +421,11 @@ body {
   .nav-btn {
     padding: 0.75rem;
     font-size: 0.9rem;
+  }
+
+  .subnav {
+    padding: 0.5rem 1rem;
+    flex-wrap: wrap;
   }
 
   .main-content {

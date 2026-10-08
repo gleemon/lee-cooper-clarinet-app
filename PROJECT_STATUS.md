@@ -170,7 +170,28 @@ config (`type` is `"string"`, `"number"`, or `"date"`) -- see
 `<select>`, a free-text search `<input>`, both wrapped in a `.filter-bar`
 div) is layered on top where it makes sense, applied before sorting.
 
-Nav: Dashboard, Repairs, Invoices, Inventory, Customers, Instruments, Ledger.
+Nav (two levels, restructured 2026-10-08): a top row of sections, plus a
+second row of sub-pages that appears under whichever section you're in:
+
+- Dashboard
+- Repairs -- sub-pages: Invoices, Inventory
+- Customers -- sub-pages: Instruments
+- Lessons -- sub-pages: Students
+- Ledger
+
+**Lessons and Students are placeholder pages** ("Coming soon" -- see the
+V2 private-lessons notes in "Planned: Accounting system"). Students is
+intended to become a filtered view of Customers, but nothing marks a
+customer as a student yet, so there's no data model behind it. Dashboard
+wasn't in the requested menu list; it was kept as the home page because
+it's the only way into the intake form.
+
+The menu is data-driven: edit `NAV_SECTIONS` near the top of `App.jsx`
+(each section has its landing `page`, optional `children`, and the full
+set of `pages` that count as "inside" it -- including pages with no
+button of their own, like a repair's detail view, so the right section
+stays highlighted). New placeholder entries can use `PlaceholderPage`.
+
 There's no separate "New Repair" nav item -- the Dashboard's
 "+ New Repair Intake" button navigates to the intake page directly (it
 used to do nothing; fixed alongside dropping the redundant nav entry).

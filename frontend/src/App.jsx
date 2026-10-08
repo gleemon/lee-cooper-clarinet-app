@@ -127,6 +127,51 @@ function MultiSelectDropdown({ label, options, selected, onToggle, allLabel }) {
   );
 }
 
+// Two-level nav: each top-level section has its own landing page (`page`),
+// optional sub-pages shown as a second row while that section is active, and
+// the full set of `pages` that count as "inside" the section -- including
+// pages with no nav button of their own (a repair's detail view, the intake
+// form) so the right section stays highlighted while you're on them.
+const NAV_SECTIONS = [
+  { id: "home", label: "Dashboard", page: "home", pages: ["home"] },
+  {
+    id: "repairs",
+    label: "Repairs",
+    page: "repairs",
+    pages: ["repairs", "repairDetail", "intake"],
+    children: [
+      { label: "Invoices", page: "invoices" },
+      { label: "Inventory", page: "inventory" }
+    ]
+  },
+  {
+    id: "customers",
+    label: "Customers",
+    page: "customers",
+    pages: ["customers"],
+    children: [{ label: "Instruments", page: "instruments" }]
+  },
+  {
+    id: "lessons",
+    label: "Lessons",
+    page: "lessons",
+    pages: ["lessons"],
+    children: [{ label: "Students", page: "students" }]
+  },
+  { id: "ledger", label: "Ledger", page: "ledger", pages: ["ledger"] }
+];
+
+// For menu items that are planned but not built yet.
+function PlaceholderPage({ title, description }) {
+  return (
+    <section className="page">
+      <h2>{title}</h2>
+      <p>Coming soon.</p>
+      <p style={{ marginTop: "0.75rem", color: "#666" }}>{description}</p>
+    </section>
+  );
+}
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState("home");
   const [repairs, setRepairs] = useState([]);
@@ -156,6 +201,17 @@ export default function App() {
     setCurrentPage("repairDetail");
   };
 
+  const goToPage = (page) => {
+    setCurrentPage(page);
+    if (page === "repairs") fetchRepairs();
+  };
+
+  // The section the current page lives in -- either one of its own pages or
+  // one of its sub-pages.
+  const activeSection = NAV_SECTIONS.find(
+    (s) => s.pages.includes(currentPage) || s.children?.some((c) => c.page === currentPage)
+  );
+
   return (
     <div className="app">
       <header className="header">
@@ -166,49 +222,30 @@ export default function App() {
       </header>
 
       <nav className="navbar">
-        <button 
-          className={`nav-btn ${currentPage === "home" ? "active" : ""}`}
-          onClick={() => setCurrentPage("home")}
-        >
-          Dashboard
-        </button>
-        <button
-          className={`nav-btn ${currentPage === "repairs" ? "active" : ""}`}
-          onClick={() => { setCurrentPage("repairs"); fetchRepairs(); }}
-        >
-          Repairs
-        </button>
-        <button
-          className={`nav-btn ${currentPage === "invoices" ? "active" : ""}`}
-          onClick={() => setCurrentPage("invoices")}
-        >
-          Invoices
-        </button>
-        <button
-          className={`nav-btn ${currentPage === "inventory" ? "active" : ""}`}
-          onClick={() => setCurrentPage("inventory")}
-        >
-          Inventory
-        </button>
-        <button
-          className={`nav-btn ${currentPage === "customers" ? "active" : ""}`}
-          onClick={() => setCurrentPage("customers")}
-        >
-          Customers
-        </button>
-        <button
-          className={`nav-btn ${currentPage === "instruments" ? "active" : ""}`}
-          onClick={() => setCurrentPage("instruments")}
-        >
-          Instruments
-        </button>
-        <button
-          className={`nav-btn ${currentPage === "ledger" ? "active" : ""}`}
-          onClick={() => setCurrentPage("ledger")}
-        >
-          Ledger
-        </button>
+        {NAV_SECTIONS.map((section) => (
+          <button
+            key={section.id}
+            className={`nav-btn ${activeSection?.id === section.id ? "active" : ""}`}
+            onClick={() => goToPage(section.page)}
+          >
+            {section.label}
+          </button>
+        ))}
       </nav>
+
+      {activeSection?.children && (
+        <nav className="subnav">
+          {activeSection.children.map((child) => (
+            <button
+              key={child.page}
+              className={`subnav-btn ${currentPage === child.page ? "active" : ""}`}
+              onClick={() => goToPage(child.page)}
+            >
+              {child.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
       <main className="main-content">
         {currentPage === "home" && <HomePage onNewRepair={() => setCurrentPage("intake")} />}
@@ -226,6 +263,18 @@ export default function App() {
         {currentPage === "inventory" && <InventoryPage />}
         {currentPage === "customers" && <CustomersPage />}
         {currentPage === "instruments" && <InstrumentsPage />}
+        {currentPage === "lessons" && (
+          <PlaceholderPage
+            title="Lessons"
+            description="Private lesson tracking is planned (see the V2 notes in PROJECT_STATUS.md): log a lesson taught, pick the student, and mark it paid into the ledger."
+          />
+        )}
+        {currentPage === "students" && (
+          <PlaceholderPage
+            title="Students"
+            description="Will be a filtered view of Customers -- the customers who take lessons. Not built yet; it needs a way to mark a customer as a student."
+          />
+        )}
         {currentPage === "ledger" && <LedgerPage />}
       </main>
 
