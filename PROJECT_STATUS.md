@@ -1,6 +1,9 @@
 # Lee Cooper Clarinet — Repair Shop App: Project Status
 
-Last updated: 2026-09-23
+Last updated: 2026-10-08
+
+**This project is v2.0** (declared 2026-10-08, when private lessons were
+built). The footer version is `2.<total commit count>.0`.
 
 **Read this file first in any new chat about this project.** It exists so a
 fresh conversation (with no memory of prior chats) can get productive in a
@@ -80,9 +83,25 @@ from the Notion workspace via its API), plus one new table not from Notion:
 
 `customers`, `technicians`, `parts_vendors`, `instruments`,
 `parts_inventory`, `repairs`, `invoices`, `work_log`, `parts_used`,
-`repair_tags`, `receipts`, and `transactions` (V1 of the accounting
+`repair_tags`, `receipts`, `transactions` (V1 of the accounting
 system -- see "Planned: Accounting system"; not Notion-derived, added
-2026-09-07).
+2026-09-07), and `lessons` (v2.0 private lessons, added 2026-10-08).
+
+`customers` also gained two columns in v2.0: `is_student` (boolean --
+the Students page is customers filtered on this) and `lesson_rate` (the
+student's usual per-lesson rate, which defaults the lesson form's
+amount). A `lessons` row has `customer_id`, `lesson_date`,
+`duration_minutes`, `amount`, `notes`, `paid`/`paid_date`, and
+`transaction_id` -- the linked ledger row, present only while the lesson
+is paid.
+
+**Where migrations live now:** new migrations go in `docker/migrations/`,
+NOT `docker/init-db/` (every `.sql` file in `init-db/` runs on a fresh
+install and a non-idempotent one breaks it -- see "Code review findings"
+item 1), and are written idempotent (`IF NOT EXISTS`). The v2.0 one is
+`docker/migrations/2026-10-08-lessons.sql` -- **NOT yet run against the
+live DB** (applied locally only, 2026-10-08). `01-schema.sql` already
+contains everything for fresh installs.
 
 Every table's `id` column is `AUTO_INCREMENT`. Tables migrated from Notion
 (customers, technicians, parts_vendors, instruments, parts_inventory,
@@ -141,6 +160,8 @@ Source files:
 - `POST /api/parts` — create a part (and its vendor too, if new)
 - `PUT /api/parts/:id` — update every field on an existing part (replaces quantity_in_stock, unlike /receive)
 - `POST /api/parts/:id/receive` — add received quantity to an existing part's stock
+- `GET /api/lessons`, `GET /api/lessons/:id`, `POST /api/lessons`, `PUT /api/lessons/:id`, `PUT /api/lessons/:id/paid` — private lessons (v2.0). `amount` must be positive; `paid` + `paidDate` (defaults to the lesson date) control payment. **Paid lessons own a ledger row:** `syncLessonLedger()` runs inside the same DB transaction as every lesson write and (a) creates an income row (category `Lessons`, payee = the student, notes `Lesson on YYYY-MM-DD`) when a lesson becomes paid, (b) updates it if a paid lesson's amount/date/student changes, (c) **deletes it** when a lesson is marked unpaid. `PUT .../paid` is the list's quick "Mark paid" toggle (sends today's browser-local date).
+- `POST /api/customers` / `PUT /api/customers/:id` now also take `is_student` and `lesson_rate` (PUT leaves them untouched if the request omits them, so an older client can't silently un-student someone)
 - `GET /api/transactions`, `POST /api/transactions` — the accounting ledger (V1, see "Planned: Accounting system"); not yet linked to invoice payments
 - `GET /api/transactions/categories`, `GET /api/transactions/payees` — distinct values already in use, for the entry form's `<datalist>` suggestions (category is paired with `type` so suggestions can be narrowed to income vs. expense)
 
@@ -179,18 +200,27 @@ second row of sub-pages that appears under whichever section you're in:
 - Lessons -- sub-pages: Students
 - Ledger
 
-**Lessons and Students are placeholder pages** ("Coming soon" -- see the
-V2 private-lessons notes in "Planned: Accounting system"). Students is
-intended to become a filtered view of Customers, but nothing marks a
-customer as a student yet, so there's no data model behind it. Dashboard
-wasn't in the requested menu list; it was kept as the home page because
-it's the only way into the intake form.
+**Lessons** (v2.0) is a quick-entry list: "+ Log Lesson" form (student
+picker -- or "+ New Student" to create one on the spot -- date defaulting
+to today, optional duration, amount defaulting to the student's usual
+rate, notes, and a Paid checkbox with a paid-on date), a list sortable by
+date/student/duration/amount/paid and filterable by student, paid/unpaid
+and free-text search, summary cards (count / Paid / Unpaid that follow the
+filters), a one-click "Mark paid" button per unpaid row, and click-the-date
+to edit (unticking Paid there removes the linked ledger row). **Students**
+is the Customers page filtered to `is_student` (`<CustomersPage
+studentsOnly />`), with a "+ New Student" form and a Usual Rate column;
+clicking a name opens the same customer edit form, which has the
+"Student" checkbox + usual-rate field -- that's also how an existing
+customer becomes a student. The Customers list shows a small "Student"
+badge. Dashboard wasn't in the requested menu list; it was kept as the
+home page because it's the only way into the intake form.
 
 The menu is data-driven: edit `NAV_SECTIONS` near the top of `App.jsx`
 (each section has its landing `page`, optional `children`, and the full
 set of `pages` that count as "inside" it -- including pages with no
 button of their own, like a repair's detail view, so the right section
-stays highlighted). New placeholder entries can use `PlaceholderPage`.
+stays highlighted).
 
 There's no separate "New Repair" nav item -- the Dashboard's
 "+ New Repair Intake" button navigates to the intake page directly (it
@@ -269,10 +299,19 @@ latter treats a date-only string as UTC midnight and rolls it back a day
 for anyone west of UTC. Affects every date shown in the app; worth
 remembering if a new date-formatting helper ever gets added elsewhere.
 
+`todayIsoDate()` builds "today" from the browser's LOCAL date parts, not
+`new Date().toISOString()` -- that's UTC, so after ~8pm US Eastern it
+returned tomorrow, putting the wrong default date on every form that
+uses it (fixed 2026-10-08, alongside the lessons work). Same family of
+bug as the `fmtDate()` one above; use `todayIsoDate()`, never
+`toISOString().slice(0, 10)`, for a "today" default. (Server-side
+`CURDATE()` is also UTC-based inside the container, so the lessons list
+sends the browser's date explicitly when marking paid.)
+
 The footer shows the running build's version + short git commit hash.
 Version comes from `frontend/package.json`'s `"version"` field
-(`__APP_VERSION__`, convention: `1.<total commit count as of that
-commit>.0`, bumped by hand as part of every commit) rather than computed
+(`__APP_VERSION__`, convention: `2.<total commit count as of that
+commit>.0` -- major bumped from 1 to 2 on 2026-10-08 -- bumped by hand as part of every commit) rather than computed
 from git at build time, since the Docker build deliberately has no
 `.git` available (see "Known issues" below) and a static `"1.0.0"` was
 never useful. The commit hash (`__COMMIT_HASH__`) still comes from `git
@@ -421,8 +460,8 @@ Decisions locked in:
    real data is flowing in from repairs/gigs/inventory so the category
    groupings are informed by actual usage instead of guessed up front.
 
-**V2** (deferred, not yet designed in detail):
-- **Private lessons**: a quick-entry page to log a lesson taught (pick
+**V2:**
+- **Private lessons -- DONE 2026-10-08 (v2.0)**, built as described below, one decision made along the way: a student is a customer flagged `is_student` with a `lesson_rate` (not "anyone with a lesson"). Original plan: a quick-entry page to log a lesson taught (pick
   student from `customers`, date defaults today, rate defaults to that
   student's usual) and mark it paid (creates a linked ledger
   transaction, same pattern as invoice payments). Depends only on the

@@ -161,17 +161,6 @@ const NAV_SECTIONS = [
   { id: "ledger", label: "Ledger", page: "ledger", pages: ["ledger"] }
 ];
 
-// For menu items that are planned but not built yet.
-function PlaceholderPage({ title, description }) {
-  return (
-    <section className="page">
-      <h2>{title}</h2>
-      <p>Coming soon.</p>
-      <p style={{ marginTop: "0.75rem", color: "#666" }}>{description}</p>
-    </section>
-  );
-}
-
 export default function App() {
   const [currentPage, setCurrentPage] = useState("home");
   const [repairs, setRepairs] = useState([]);
@@ -263,18 +252,8 @@ export default function App() {
         {currentPage === "inventory" && <InventoryPage />}
         {currentPage === "customers" && <CustomersPage />}
         {currentPage === "instruments" && <InstrumentsPage />}
-        {currentPage === "lessons" && (
-          <PlaceholderPage
-            title="Lessons"
-            description="Private lesson tracking is planned (see the V2 notes in PROJECT_STATUS.md): log a lesson taught, pick the student, and mark it paid into the ledger."
-          />
-        )}
-        {currentPage === "students" && (
-          <PlaceholderPage
-            title="Students"
-            description="Will be a filtered view of Customers -- the customers who take lessons. Not built yet; it needs a way to mark a customer as a student."
-          />
-        )}
+        {currentPage === "lessons" && <LessonsPage />}
+        {currentPage === "students" && <CustomersPage studentsOnly />}
         {currentPage === "ledger" && <LedgerPage />}
       </main>
 
@@ -718,8 +697,14 @@ function markupPercentToMultiplier(percent) {
   return Number.isNaN(v) ? "" : String(1 + v / 100);
 }
 
+// "Today" as YYYY-MM-DD in the browser's LOCAL time zone. Don't use
+// new Date().toISOString() for this -- that's UTC, so in the evening
+// (after ~8pm US Eastern) it returns tomorrow's date.
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 // tax_rate is stored as a fraction (0.06 = 6%) but shown/entered as a
@@ -1890,12 +1875,88 @@ const CUSTOMER_COLUMNS = [
   { key: "state", label: "State", type: "string" }
 ];
 
-function CustomersPage() {
+const STUDENT_COLUMNS = [
+  { key: "name", label: "Name", type: "string" },
+  { key: "email", label: "Email", type: "string" },
+  { key: "phone", label: "Phone", type: "string" },
+  { key: "lesson_rate", label: "Usual Rate", type: "number" }
+];
+
+const EMPTY_STUDENT = { name: "", email: "", phone: "", lesson_rate: "" };
+
+// The inputs for a brand-new student, shared by the Students page's
+// "+ New Student" form and the lesson form's "+ New Student" option.
+function StudentFields({ data, onChange }) {
+  return (
+    <>
+      <div className="form-group">
+        <label>Student Name *</label>
+        <input type="text" name="name" value={data.name} onChange={onChange} required />
+      </div>
+      <div className="form-group">
+        <label>Email</label>
+        <input type="email" name="email" value={data.email} onChange={onChange} />
+      </div>
+      <div className="form-group">
+        <label>Phone</label>
+        <input type="tel" name="phone" value={data.phone} onChange={onChange} />
+      </div>
+      <div className="form-group">
+        <label>Usual Lesson Rate</label>
+        <input type="number" name="lesson_rate" value={data.lesson_rate} onChange={onChange} step="0.01" min="0" />
+      </div>
+    </>
+  );
+}
+
+function NewStudentForm({ onSaved }) {
+  const [data, setData] = useState(EMPTY_STUDENT);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await axios.post(`${API_URL}/api/customers`, { ...data, is_student: true });
+      onSaved();
+    } catch (err) {
+      console.error("Error creating student:", err);
+      setError(err.response?.data?.error || "Could not save this student.");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="form" style={{ marginBottom: "2rem" }}>
+      {error && <p className="form-error">{error}</p>}
+      <StudentFields data={data} onChange={handleChange} />
+      <button type="submit" className="btn-primary" disabled={submitting}>
+        {submitting ? "Saving..." : "Add Student"}
+      </button>
+    </form>
+  );
+}
+
+// `studentsOnly` turns this into the Students page: the same customers list,
+// filtered to customers flagged as students, with a "+ New Student" form.
+// Both share the customer edit page, so a student is edited like any customer.
+function CustomersPage({ studentsOnly = false }) {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewingCustomerId, setViewingCustomerId] = useState(null);
+  const [showForm, setShowForm] = useState(false);
   const { sortField, sortDirection, handleSort } = useSort("name");
   const [search, setSearch] = useState("");
+
+  const noun = studentsOnly ? "Students" : "Customers";
+  const columns = studentsOnly ? STUDENT_COLUMNS : CUSTOMER_COLUMNS;
 
   const fetchCustomers = () => {
     setLoading(true);
@@ -1914,6 +1975,7 @@ function CustomersPage() {
     return (
       <CustomerEditPage
         customerId={viewingCustomerId}
+        backLabel={noun}
         onBack={() => setViewingCustomerId(null)}
         onSaved={() => {
           setViewingCustomerId(null);
@@ -1923,20 +1985,37 @@ function CustomersPage() {
     );
   }
 
-  const filtered = customers.filter((c) => {
+  const visible = studentsOnly ? customers.filter((c) => c.is_student) : customers;
+
+  const filtered = visible.filter((c) => {
     if (!search) return true;
     const q = search.toLowerCase();
     const haystack = `${c.name || ""} ${c.email || ""} ${c.phone || ""}`.toLowerCase();
     return haystack.includes(q);
   });
 
-  const sorted = sortRows(filtered, CUSTOMER_COLUMNS, sortField, sortDirection);
+  const sorted = sortRows(filtered, columns, sortField, sortDirection);
 
   return (
     <section className="page">
-      <h2>Customers</h2>
+      <h2>{noun}</h2>
 
-      {customers.length > 0 && (
+      {studentsOnly && (
+        <button className="btn-primary" style={{ marginBottom: "1.5rem" }} onClick={() => setShowForm((s) => !s)}>
+          {showForm ? "Cancel" : "+ New Student"}
+        </button>
+      )}
+
+      {studentsOnly && showForm && (
+        <NewStudentForm
+          onSaved={() => {
+            setShowForm(false);
+            fetchCustomers();
+          }}
+        />
+      )}
+
+      {visible.length > 0 && (
         <div className="filter-bar">
           <div className="form-group">
             <label>Search</label>
@@ -1952,15 +2031,19 @@ function CustomersPage() {
 
       {loading ? (
         <p>Loading...</p>
-      ) : customers.length === 0 ? (
-        <p>No customers yet.</p>
+      ) : visible.length === 0 ? (
+        studentsOnly ? (
+          <p>No students yet. Add one above, or tick "Student" on an existing customer's page.</p>
+        ) : (
+          <p>No customers yet.</p>
+        )
       ) : sorted.length === 0 ? (
-        <p>No customers match this filter.</p>
+        <p>No {noun.toLowerCase()} match this filter.</p>
       ) : (
         <table className="table">
           <thead>
             <SortableHeaderRow
-              columns={CUSTOMER_COLUMNS}
+              columns={columns}
               sortField={sortField}
               sortDirection={sortDirection}
               onSort={handleSort}
@@ -1973,11 +2056,20 @@ function CustomersPage() {
                   <button className="link-btn" onClick={() => setViewingCustomerId(c.id)}>
                     {c.name}
                   </button>
+                  {!studentsOnly && Boolean(c.is_student) && (
+                    <span className="status-badge" style={{ marginLeft: "0.5rem" }}>Student</span>
+                  )}
                 </td>
                 <td>{c.email || "--"}</td>
                 <td>{c.phone || "--"}</td>
-                <td>{c.city || "--"}</td>
-                <td>{c.state || "--"}</td>
+                {studentsOnly ? (
+                  <td>{fmtMoney(c.lesson_rate)}</td>
+                ) : (
+                  <>
+                    <td>{c.city || "--"}</td>
+                    <td>{c.state || "--"}</td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
@@ -1987,7 +2079,7 @@ function CustomersPage() {
   );
 }
 
-function CustomerEditPage({ customerId, onBack, onSaved }) {
+function CustomerEditPage({ customerId, onBack, onSaved, backLabel = "Customers" }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [formData, setFormData] = useState({
@@ -1999,7 +2091,9 @@ function CustomerEditPage({ customerId, onBack, onSaved }) {
     city: "",
     state: "",
     zip: "",
-    notes: ""
+    notes: "",
+    is_student: false,
+    lesson_rate: ""
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -2022,7 +2116,9 @@ function CustomerEditPage({ customerId, onBack, onSaved }) {
           city: c.city || "",
           state: c.state || "",
           zip: c.zip || "",
-          notes: c.notes || ""
+          notes: c.notes || "",
+          is_student: Boolean(c.is_student),
+          lesson_rate: c.lesson_rate ?? ""
         });
       })
       .catch((err) => {
@@ -2038,8 +2134,8 @@ function CustomerEditPage({ customerId, onBack, onSaved }) {
   }, [customerId]);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
   };
 
   const handleSubmit = async (e) => {
@@ -2059,7 +2155,7 @@ function CustomerEditPage({ customerId, onBack, onSaved }) {
   if (loading) {
     return (
       <section className="page">
-        <button className="btn-small" onClick={onBack}>&larr; Back to Customers</button>
+        <button className="btn-small" onClick={onBack}>&larr; Back to {backLabel}</button>
         <p>Loading...</p>
       </section>
     );
@@ -2068,7 +2164,7 @@ function CustomerEditPage({ customerId, onBack, onSaved }) {
   if (loadError) {
     return (
       <section className="page">
-        <button className="btn-small" onClick={onBack}>&larr; Back to Customers</button>
+        <button className="btn-small" onClick={onBack}>&larr; Back to {backLabel}</button>
         <p>{loadError}</p>
       </section>
     );
@@ -2076,7 +2172,7 @@ function CustomerEditPage({ customerId, onBack, onSaved }) {
 
   return (
     <section className="page">
-      <button className="btn-small" onClick={onBack} style={{ marginBottom: "1.5rem" }}>&larr; Back to Customers</button>
+      <button className="btn-small" onClick={onBack} style={{ marginBottom: "1.5rem" }}>&larr; Back to {backLabel}</button>
       <h2>Edit Customer</h2>
       {error && <p className="form-error">{error}</p>}
       <form onSubmit={handleSubmit} className="form">
@@ -2112,6 +2208,18 @@ function CustomerEditPage({ customerId, onBack, onSaved }) {
           <label>Zip</label>
           <input type="text" name="zip" value={formData.zip} onChange={handleChange} />
         </div>
+        <div className="form-group">
+          <label className="checkbox-option">
+            <input type="checkbox" name="is_student" checked={formData.is_student} onChange={handleChange} />
+            Student (takes private lessons)
+          </label>
+        </div>
+        {formData.is_student && (
+          <div className="form-group">
+            <label>Usual Lesson Rate</label>
+            <input type="number" name="lesson_rate" value={formData.lesson_rate} onChange={handleChange} step="0.01" min="0" />
+          </div>
+        )}
         <div className="form-group">
           <label>Notes</label>
           <textarea name="notes" value={formData.notes} onChange={handleChange} rows="3"></textarea>
@@ -2599,7 +2707,7 @@ function TransactionForm({ categories, payees, onSaved }) {
     category: "",
     amount: "",
     payee: "",
-    transactionDate: new Date().toISOString().slice(0, 10),
+    transactionDate: todayIsoDate(),
     notes: ""
   });
   const [submitting, setSubmitting] = useState(false);
@@ -2688,5 +2796,416 @@ function TransactionForm({ categories, payees, onSaved }) {
         {submitting ? "Saving..." : "Add Transaction"}
       </button>
     </form>
+  );
+}
+
+const LESSON_COLUMNS = [
+  { key: "lesson_date", label: "Date", type: "date" },
+  { key: "student_name", label: "Student", type: "string" },
+  { key: "duration_minutes", label: "Duration", type: "number" },
+  { key: "amount", label: "Amount", type: "number" },
+  { key: "paid", label: "Paid", type: "number" }
+];
+
+// Private lessons (v2.0). A student is a customer flagged is_student.
+// Marking a lesson paid writes a linked income row to the ledger (done
+// server-side -- see syncLessonLedger in backend/server.js); marking it
+// unpaid removes it again, so lesson income is never entered twice.
+function LessonsPage() {
+  const [lessons, setLessons] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingLessonId, setEditingLessonId] = useState(null);
+  const [error, setError] = useState(null);
+  const { sortField, sortDirection, handleSort } = useSort("lesson_date", "desc");
+  const [studentFilter, setStudentFilter] = useState("");
+  const [paidFilter, setPaidFilter] = useState("");
+  const [search, setSearch] = useState("");
+
+  const fetchAll = () => {
+    setLoading(true);
+    Promise.all([axios.get(`${API_URL}/api/lessons`), axios.get(`${API_URL}/api/customers`)])
+      .then(([lessonsRes, customersRes]) => {
+        setLessons(lessonsRes.data);
+        setStudents(customersRes.data.filter((c) => c.is_student));
+      })
+      .catch((err) => console.error("Error fetching lessons:", err))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchAll();
+  }, []);
+
+  const markPaid = async (lessonId) => {
+    setError(null);
+    try {
+      await axios.put(`${API_URL}/api/lessons/${lessonId}/paid`, { paid: true, paidDate: todayIsoDate() });
+      fetchAll();
+    } catch (err) {
+      console.error("Error marking lesson paid:", err);
+      setError(err.response?.data?.error || "Could not mark this lesson paid.");
+    }
+  };
+
+  if (editingLessonId) {
+    return (
+      <LessonEditPage
+        lessonId={editingLessonId}
+        students={students}
+        onBack={() => setEditingLessonId(null)}
+        onSaved={() => {
+          setEditingLessonId(null);
+          fetchAll();
+        }}
+      />
+    );
+  }
+
+  const filtered = lessons.filter((l) => {
+    if (studentFilter && String(l.customer_id) !== studentFilter) return false;
+    if (paidFilter === "paid" && !l.paid) return false;
+    if (paidFilter === "unpaid" && l.paid) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const haystack = `${l.student_name || ""} ${l.notes || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sorted = sortRows(filtered, LESSON_COLUMNS, sortField, sortDirection);
+
+  const totals = filtered.reduce(
+    (acc, l) => {
+      const amt = parseFloat(l.amount) || 0;
+      acc.billed += amt;
+      if (l.paid) acc.paid += amt;
+      else acc.unpaid += amt;
+      return acc;
+    },
+    { billed: 0, paid: 0, unpaid: 0 }
+  );
+
+  return (
+    <section className="page">
+      <h2>Lessons</h2>
+      <button className="btn-primary" style={{ marginBottom: "1.5rem" }} onClick={() => setShowForm((v) => !v)}>
+        {showForm ? "Cancel" : "+ Log Lesson"}
+      </button>
+
+      {error && <p className="form-error">{error}</p>}
+
+      {showForm && (
+        <LessonForm
+          students={students}
+          allowNewStudent
+          defaultAmountFromRate
+          submitLabel="Log Lesson"
+          initial={{
+            studentId: "",
+            lessonDate: todayIsoDate(),
+            durationMinutes: "",
+            amount: "",
+            notes: "",
+            paid: false,
+            paidDate: todayIsoDate()
+          }}
+          onSubmit={async (payload) => {
+            await axios.post(`${API_URL}/api/lessons`, payload);
+            setShowForm(false);
+            fetchAll();
+          }}
+        />
+      )}
+
+      {lessons.length > 0 && (
+        <>
+          <div className="filter-bar">
+            <div className="form-group">
+              <label>Student</label>
+              <select value={studentFilter} onChange={(e) => setStudentFilter(e.target.value)}>
+                <option value="">All Students</option>
+                {[...new Map(lessons.filter((l) => l.customer_id).map((l) => [l.customer_id, l.student_name])).entries()]
+                  .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+                  .map(([id, name]) => (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Payment</label>
+              <select value={paidFilter} onChange={(e) => setPaidFilter(e.target.value)}>
+                <option value="">All</option>
+                <option value="paid">Paid</option>
+                <option value="unpaid">Unpaid</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Search</label>
+              <input
+                type="text"
+                placeholder="Student or notes..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="dashboard-grid" style={{ marginBottom: "1.5rem" }}>
+            <div className="card">
+              <h3>Lessons</h3>
+              <p className="ledger-amount">{filtered.length}</p>
+            </div>
+            <div className="card">
+              <h3>Paid</h3>
+              <p className="ledger-amount ledger-income">{fmtMoney(totals.paid)}</p>
+            </div>
+            <div className="card">
+              <h3>Unpaid</h3>
+              <p className="ledger-amount ledger-expense">{fmtMoney(totals.unpaid)}</p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {loading ? (
+        <p>Loading...</p>
+      ) : lessons.length === 0 ? (
+        <p>No lessons logged yet.</p>
+      ) : sorted.length === 0 ? (
+        <p>No lessons match this filter.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <SortableHeaderRow
+              columns={LESSON_COLUMNS}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
+          </thead>
+          <tbody>
+            {sorted.map((l) => (
+              <tr key={l.id}>
+                <td>
+                  <button className="link-btn" onClick={() => setEditingLessonId(l.id)}>
+                    {fmtDate(l.lesson_date)}
+                  </button>
+                </td>
+                <td>{l.student_name || "--"}</td>
+                <td>{l.duration_minutes ? `${l.duration_minutes} min` : "--"}</td>
+                <td>{fmtMoney(l.amount)}</td>
+                <td>
+                  {l.paid ? (
+                    <span className="status-badge ledger-income-badge">Paid {fmtDate(l.paid_date)}</span>
+                  ) : (
+                    <button className="btn-small" onClick={() => markPaid(l.id)}>Mark paid</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+// Shared by "+ Log Lesson" and the lesson edit page. `onSubmit` receives the
+// API payload and does the actual save; throwing shows its message here.
+function LessonForm({ students, initial, allowNewStudent, defaultAmountFromRate, submitLabel, onSubmit }) {
+  const [formData, setFormData] = useState(initial);
+  const [newStudent, setNewStudent] = useState(EMPTY_STUDENT);
+  // If creating the student succeeds but saving the lesson fails, remember
+  // the student so a retry doesn't create a duplicate one.
+  const [createdStudentId, setCreatedStudentId] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+  };
+
+  const handleStudentChange = (e) => {
+    const value = e.target.value;
+    const student = students.find((st) => String(st.id) === value);
+    setFormData((prev) => ({
+      ...prev,
+      studentId: value,
+      // New lessons default to the student's usual rate (still editable).
+      amount:
+        defaultAmountFromRate && student?.lesson_rate
+          ? String(parseFloat(student.lesson_rate))
+          : prev.amount
+    }));
+  };
+
+  const handleNewStudentChange = (e) => {
+    const { name, value } = e.target;
+    setNewStudent((prev) => ({ ...prev, [name]: value }));
+    // Typing a rate for a brand-new student fills the amount too, unless
+    // the amount has already been changed by hand.
+    if (name === "lesson_rate" && defaultAmountFromRate) {
+      setFormData((prev) =>
+        prev.amount === "" || prev.amount === newStudent.lesson_rate ? { ...prev, amount: value } : prev
+      );
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      let customerId = formData.studentId;
+      if (customerId === "new") {
+        if (createdStudentId) {
+          customerId = createdStudentId;
+        } else {
+          const res = await axios.post(`${API_URL}/api/customers`, { ...newStudent, is_student: true });
+          customerId = res.data.id;
+          setCreatedStudentId(customerId);
+        }
+      }
+      await onSubmit({
+        customerId,
+        lessonDate: formData.lessonDate,
+        durationMinutes: formData.durationMinutes,
+        amount: formData.amount,
+        notes: formData.notes,
+        paid: formData.paid,
+        paidDate: formData.paid ? formData.paidDate : null
+      });
+    } catch (err) {
+      console.error("Error saving lesson:", err);
+      setError(err.response?.data?.error || "Could not save this lesson.");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="form" style={{ marginBottom: "2rem" }}>
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-group">
+        <label>Student *</label>
+        <select name="studentId" value={formData.studentId} onChange={handleStudentChange} required>
+          <option value="">Select a student...</option>
+          {students.map((st) => (
+            <option key={st.id} value={st.id}>{st.name}</option>
+          ))}
+          {allowNewStudent && <option value="new">+ New Student</option>}
+        </select>
+      </div>
+      {formData.studentId === "new" && (
+        <StudentFields data={newStudent} onChange={handleNewStudentChange} />
+      )}
+      <div className="form-group">
+        <label>Date *</label>
+        <input type="date" name="lessonDate" value={formData.lessonDate} onChange={handleChange} required />
+      </div>
+      <div className="form-group">
+        <label>Duration (minutes)</label>
+        {/* min="0" so the 5-minute steps land on 30/45/60 -- with min="1" the browser only accepts 1, 6, 11 ... 26, 31 and rejects a 30-minute lesson. */}
+        <input type="number" name="durationMinutes" value={formData.durationMinutes} onChange={handleChange} step="5" min="0" placeholder="e.g. 30" />
+      </div>
+      <div className="form-group">
+        <label>Amount *</label>
+        <input type="number" name="amount" value={formData.amount} onChange={handleChange} step="0.01" min="0.01" required />
+      </div>
+      <div className="form-group">
+        <label>Notes</label>
+        <textarea name="notes" value={formData.notes} onChange={handleChange} rows="3" placeholder="What you covered, what to practice..."></textarea>
+      </div>
+      <div className="form-group">
+        <label className="checkbox-option">
+          <input type="checkbox" name="paid" checked={formData.paid} onChange={handleChange} />
+          Paid
+        </label>
+      </div>
+      {formData.paid && (
+        <>
+          <div className="form-group">
+            <label>Paid On</label>
+            <input type="date" name="paidDate" value={formData.paidDate} onChange={handleChange} required />
+          </div>
+          <p style={{ color: "#666", fontSize: "0.9rem" }}>
+            Marking a lesson paid adds an income entry to the Ledger (category "Lessons").
+            Unchecking Paid later removes that entry.
+          </p>
+        </>
+      )}
+      <button type="submit" className="btn-primary" disabled={submitting}>
+        {submitting ? "Saving..." : submitLabel}
+      </button>
+    </form>
+  );
+}
+
+function LessonEditPage({ lessonId, students, onBack, onSaved }) {
+  const [lesson, setLesson] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    axios
+      .get(`${API_URL}/api/lessons/${lessonId}`)
+      .then((res) => {
+        if (!cancelled) setLesson(res.data);
+      })
+      .catch((err) => {
+        console.error("Error fetching lesson:", err);
+        if (!cancelled) setLoadError("Could not load this lesson.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lessonId]);
+
+  if (loading || loadError) {
+    return (
+      <section className="page">
+        <button className="btn-small" onClick={onBack}>&larr; Back to Lessons</button>
+        <p>{loadError || "Loading..."}</p>
+      </section>
+    );
+  }
+
+  // A lesson's student might no longer be flagged as a student; keep them
+  // selectable so the form doesn't silently blank the field.
+  const options = students.some((st) => st.id === lesson.customer_id)
+    ? students
+    : [...students, { id: lesson.customer_id, name: lesson.student_name }];
+
+  return (
+    <section className="page">
+      <button className="btn-small" onClick={onBack} style={{ marginBottom: "1.5rem" }}>&larr; Back to Lessons</button>
+      <h2>Edit Lesson</h2>
+      <LessonForm
+        students={options}
+        submitLabel="Save Changes"
+        initial={{
+          studentId: String(lesson.customer_id ?? ""),
+          lessonDate: String(lesson.lesson_date).slice(0, 10),
+          durationMinutes: lesson.duration_minutes ?? "",
+          amount: String(parseFloat(lesson.amount)),
+          notes: lesson.notes || "",
+          paid: Boolean(lesson.paid),
+          paidDate: lesson.paid_date ? String(lesson.paid_date).slice(0, 10) : todayIsoDate()
+        }}
+        onSubmit={async (payload) => {
+          await axios.put(`${API_URL}/api/lessons/${lessonId}`, payload);
+          onSaved();
+        }}
+      />
+    </section>
   );
 }

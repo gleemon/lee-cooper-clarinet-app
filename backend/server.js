@@ -64,11 +64,13 @@ app.get("/api/customers", async (req, res) => {
 
 app.post("/api/customers", async (req, res) => {
   try {
-    const { name, email, phone, address_line1, address_line2, city, state, zip, notes } = req.body;
+    const { name, email, phone, address_line1, address_line2, city, state, zip, notes, is_student, lesson_rate } = req.body;
+    if (!name) return res.status(400).json({ error: "name is required" });
+    if (isNegative(lesson_rate)) return res.status(400).json({ error: "lesson_rate must be positive" });
     const conn = await pool.getConnection();
     const [result] = await conn.query(
-      "INSERT INTO customers (name, email, phone, address_line1, address_line2, city, state, zip, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [name, email, phone, address_line1, address_line2, city, state, zip, notes]
+      "INSERT INTO customers (name, email, phone, address_line1, address_line2, city, state, zip, notes, is_student, lesson_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [name, email, phone, address_line1, address_line2, city, state, zip, notes, is_student ? 1 : 0, lesson_rate || null]
     );
     conn.release();
     res.json({ id: result.insertId, ...req.body });
@@ -93,17 +95,31 @@ app.get("/api/customers/:id", async (req, res) => {
 // Update an existing customer's record. Used by the customer edit page.
 app.put("/api/customers/:id", async (req, res) => {
   try {
-    const { name, email, phone, address_line1, address_line2, city, state, zip, notes } = req.body;
+    const { name, email, phone, address_line1, address_line2, city, state, zip, notes, is_student, lesson_rate } = req.body;
     if (!name) {
       return res.status(400).json({ error: "name is required" });
     }
+    if (isNegative(lesson_rate)) {
+      return res.status(400).json({ error: "lesson_rate must be positive" });
+    }
     const conn = await pool.getConnection();
+    // is_student / lesson_rate are only touched when the request includes
+    // them, so a client that doesn't know about them can't silently reset
+    // a student back to a plain customer.
     const [result] = await conn.query(
       `UPDATE customers SET
          name = ?, email = ?, phone = ?, address_line1 = ?, address_line2 = ?,
-         city = ?, state = ?, zip = ?, notes = ?
+         city = ?, state = ?, zip = ?, notes = ?,
+         is_student = COALESCE(?, is_student),
+         lesson_rate = IF(?, ?, lesson_rate)
        WHERE id = ?`,
-      [name, email || null, phone || null, address_line1 || null, address_line2 || null, city || null, state || null, zip || null, notes || null, req.params.id]
+      [
+        name, email || null, phone || null, address_line1 || null, address_line2 || null,
+        city || null, state || null, zip || null, notes || null,
+        is_student === undefined ? null : (is_student ? 1 : 0),
+        lesson_rate !== undefined, lesson_rate || null,
+        req.params.id
+      ]
     );
     if (result.affectedRows === 0) {
       conn.release();
@@ -977,6 +993,179 @@ app.post("/api/transactions", async (req, res) => {
     res.json({ id: result.insertId });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Private lessons (v2.0). A student is a customer with is_student set.
+// Marking a lesson paid writes a linked income row to `transactions`
+// (category "Lessons", payee = the student) and stores its id on the lesson;
+// marking it unpaid deletes that row again, and editing a paid lesson keeps
+// the row in sync -- so lesson income is never entered in two places.
+const LESSON_SELECT =
+  "SELECT l.*, c.name AS student_name FROM lessons l LEFT JOIN customers c ON l.customer_id = c.id";
+
+function parseLessonBody(body) {
+  const { customerId, lessonDate, durationMinutes, amount, notes, paid, paidDate } = body;
+  if (!customerId) return { error: "customerId is required" };
+  if (!lessonDate) return { error: "lessonDate is required" };
+  const amountNum = parseFloat(amount);
+  if (!amountNum || amountNum <= 0) return { error: "amount must be a positive number" };
+  let duration = null;
+  if (durationMinutes !== undefined && durationMinutes !== null && durationMinutes !== "") {
+    duration = parseInt(durationMinutes, 10);
+    if (!duration || duration <= 0) {
+      return { error: "durationMinutes must be a positive whole number" };
+    }
+  }
+  const isPaid = Boolean(paid);
+  return {
+    values: {
+      customerId,
+      lessonDate,
+      duration,
+      amount: amountNum,
+      notes: notes || null,
+      paid: isPaid,
+      paidDate: isPaid ? paidDate || lessonDate : null
+    }
+  };
+}
+
+// Make the ledger agree with the lesson's current state. Call inside the
+// same DB transaction as the lesson write.
+async function syncLessonLedger(conn, lessonId) {
+  const [rows] = await conn.query(
+    `SELECT l.*, c.name AS student_name,
+            DATE_FORMAT(l.lesson_date, '%Y-%m-%d') AS lesson_date_str,
+            DATE_FORMAT(l.paid_date, '%Y-%m-%d') AS paid_date_str
+     FROM lessons l LEFT JOIN customers c ON l.customer_id = c.id WHERE l.id = ?`,
+    [lessonId]
+  );
+  const lesson = rows[0];
+  if (!lesson) return;
+
+  if (lesson.paid) {
+    const txDate = lesson.paid_date_str || lesson.lesson_date_str;
+    const note = `Lesson on ${lesson.lesson_date_str}`;
+    if (lesson.transaction_id) {
+      await conn.query(
+        "UPDATE transactions SET amount = ?, payee = ?, transaction_date = ?, notes = ? WHERE id = ?",
+        [lesson.amount, lesson.student_name, txDate, note, lesson.transaction_id]
+      );
+    } else {
+      const [tx] = await conn.query(
+        "INSERT INTO transactions (type, category, amount, payee, transaction_date, notes) VALUES ('income', 'Lessons', ?, ?, ?, ?)",
+        [lesson.amount, lesson.student_name, txDate, note]
+      );
+      await conn.query("UPDATE lessons SET transaction_id = ? WHERE id = ?", [tx.insertId, lessonId]);
+    }
+  } else if (lesson.transaction_id) {
+    await conn.query("UPDATE lessons SET transaction_id = NULL WHERE id = ?", [lessonId]);
+    await conn.query("DELETE FROM transactions WHERE id = ?", [lesson.transaction_id]);
+  }
+}
+
+app.get("/api/lessons", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`${LESSON_SELECT} ORDER BY l.lesson_date DESC, l.id DESC`);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/lessons/:id", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`${LESSON_SELECT} WHERE l.id = ?`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: "Lesson not found" });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/lessons", async (req, res) => {
+  const parsed = parseLessonBody(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const v = parsed.values;
+
+  const conn = await pool.getConnection();
+  try {
+    const [cust] = await conn.query("SELECT id FROM customers WHERE id = ?", [v.customerId]);
+    if (!cust[0]) return res.status(400).json({ error: "Student not found" });
+
+    await conn.beginTransaction();
+    const [result] = await conn.query(
+      "INSERT INTO lessons (customer_id, lesson_date, duration_minutes, amount, notes, paid, paid_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [v.customerId, v.lessonDate, v.duration, v.amount, v.notes, v.paid ? 1 : 0, v.paidDate]
+    );
+    await syncLessonLedger(conn, result.insertId);
+    await conn.commit();
+    res.json({ id: result.insertId });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+app.put("/api/lessons/:id", async (req, res) => {
+  const parsed = parseLessonBody(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const v = parsed.values;
+
+  const conn = await pool.getConnection();
+  try {
+    const [cust] = await conn.query("SELECT id FROM customers WHERE id = ?", [v.customerId]);
+    if (!cust[0]) return res.status(400).json({ error: "Student not found" });
+
+    await conn.beginTransaction();
+    const [result] = await conn.query(
+      `UPDATE lessons SET customer_id = ?, lesson_date = ?, duration_minutes = ?, amount = ?,
+         notes = ?, paid = ?, paid_date = ? WHERE id = ?`,
+      [v.customerId, v.lessonDate, v.duration, v.amount, v.notes, v.paid ? 1 : 0, v.paidDate, req.params.id]
+    );
+    if (result.affectedRows === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: "Lesson not found" });
+    }
+    await syncLessonLedger(conn, req.params.id);
+    await conn.commit();
+    const [rows] = await conn.query(`${LESSON_SELECT} WHERE l.id = ?`, [req.params.id]);
+    res.json(rows[0]);
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// Quick toggle from the lessons list: mark one lesson paid (today, unless a
+// paidDate is given) or unpaid, without resending the whole lesson.
+app.put("/api/lessons/:id/paid", async (req, res) => {
+  const isPaid = Boolean(req.body.paid);
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [result] = await conn.query(
+      "UPDATE lessons SET paid = ?, paid_date = IF(?, COALESCE(?, CURDATE()), NULL) WHERE id = ?",
+      [isPaid ? 1 : 0, isPaid, req.body.paidDate || null, req.params.id]
+    );
+    if (result.affectedRows === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: "Lesson not found" });
+    }
+    await syncLessonLedger(conn, req.params.id);
+    await conn.commit();
+    const [rows] = await conn.query(`${LESSON_SELECT} WHERE l.id = ?`, [req.params.id]);
+    res.json(rows[0]);
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
   }
 });
 

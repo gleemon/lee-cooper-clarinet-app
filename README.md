@@ -10,6 +10,10 @@ invoices.
 - Repair detail view with labor/parts billing breakdown
 - PDF repair receipts and itemized invoices (labor + parts + tax)
 - Invoice list with per-invoice PDF download
+- Private lesson tracking: log lessons per student (with a usual rate that
+  pre-fills the amount) and mark them paid, which records the income in the
+  ledger automatically
+- Income/expense ledger for gigs, lessons, and business expenses
 
 ## Tech stack
 

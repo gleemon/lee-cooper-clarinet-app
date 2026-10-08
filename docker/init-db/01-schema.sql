@@ -29,6 +29,8 @@ CREATE TABLE customers (
   state VARCHAR(10),
   zip VARCHAR(20),
   notes TEXT,
+  is_student BOOLEAN NOT NULL DEFAULT FALSE,  -- takes private lessons (see `lessons`); the Students page is customers filtered on this
+  lesson_rate DECIMAL(10,2),                  -- usual per-lesson rate; defaults the lesson form's amount
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -178,4 +180,24 @@ CREATE TABLE transactions (
   transaction_date DATE NOT NULL,
   notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Private lessons (v2.0). A student is a customer with is_student set.
+-- Marking a lesson paid writes a linked income row to `transactions`
+-- (category "Lessons", payee = the student) and records its id here, so
+-- lesson income flows into the ledger instead of being entered twice;
+-- marking it unpaid removes that row again. See PROJECT_STATUS.md.
+CREATE TABLE lessons (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT,
+  lesson_date DATE NOT NULL,
+  duration_minutes INT,
+  amount DECIMAL(10,2) NOT NULL,
+  notes TEXT,
+  paid BOOLEAN NOT NULL DEFAULT FALSE,
+  paid_date DATE,
+  transaction_id INT,                     -- the linked ledger row, while paid
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE SET NULL
 );
