@@ -31,11 +31,19 @@ any committed file.
 
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
-  method). Confirmed live and up to date as of commit `fe547ac`
-  (checked 2026-08-27) -- this includes everything in the "Done" list
-  at the bottom of this file: Print Repair Ticket rename, conditional
-  Create Invoice button, idempotent invoice creation, and invoice
-  editing. This file has been caught by surprise more than once now by
+  method). Confirmed live and up to date as of commit `2db3890`
+  (redeployed via the Portainer API and verified 2026-10-08: Portainer's
+  `ConfigHash` read `2db3890`, and the live bundle serves `v1.48.0` with
+  the Ledger tab) -- this includes everything in the "Done" list at the
+  bottom of this file plus the transactions ledger (V1 of the accounting
+  system). `migrate-add-transactions-table.sql` was run against the live
+  DB the same day (table exists, endpoints return 200, ledger empty --
+  no test rows were written to live). Note that a Portainer redeploy
+  recreates the `lcc-mariadb` container too (brief DB restart; data is
+  safe in the named volume), and the PUT returns before the rebuild
+  finishes -- wait ~30s before checking the live bundle, or you'll
+  see the old version and wrongly conclude it didn't deploy. This file
+  has been caught by surprise more than once now by
   redeploys/migrations done without a PROJECT_STATUS.md update -- treat
   this section as a claim to verify, not a fact, and cross-check
   Portainer's `ConfigHash` via the API before assuming what's live.
@@ -106,12 +114,13 @@ Source files:
   `Duplicate column name 'notes'` and MariaDB exits. See "Code review
   findings" below (item 1).
 - `docker/init-db/migrate-add-transactions-table.sql` — creates the new
-  `transactions` table. **NOT yet run against the live DB** -- applied
-  locally only so far (2026-09-07). Unlike the three above, this one is
+  `transactions` table. **Run against both local and live DBs**
+  (live: 2026-10-08, verified via `DESCRIBE transactions` and the
+  endpoints returning 200). Unlike the three above, this one is
   safe to leave in `docker/init-db/`: it uses `CREATE TABLE IF NOT
   EXISTS`, so on a fresh volume (where `01-schema.sql` has already
-  created the table) it's a harmless no-op. Move it to `applied patches/`
-  once it's been run on live.
+  created the table) it's a harmless no-op. It can move to
+  `applied patches/` whenever convenient.
 
 ## Backend API (backend/server.js)
 
@@ -372,9 +381,9 @@ Decisions locked in:
    form (`POST /api/transactions`) and a sortable/filterable list
    (`GET /api/transactions`) with Income/Expenses/Net summary cards that
    recompute from whatever's currently filtered. **Deliberately excludes
-   invoice payments** (step 2 below) per explicit instruction. Not yet
-   deployed to the live DB -- see `migrate-add-transactions-table.sql` in
-   "Database schema" above.
+   invoice payments** (step 2 below) per explicit instruction. Live on
+   the NUC as of 2026-10-08 (code + `migrate-add-transactions-table.sql`
+   both applied -- see "Current deployment status" above).
 2. Real invoice payment system -- replaces `payment_status` with actual
    payment records; each recorded payment also writes a linked
    transaction, so repair-shop revenue flows into the same ledger
