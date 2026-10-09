@@ -34,10 +34,11 @@ any committed file.
 
 - Live on the NUC via Portainer (stack `instrument_repair`, id 6,
   endpoint id 3), deployed from the GitHub repo (Git repository stack
-  method). Confirmed live and up to date as of commit `2db3890`
-  (redeployed via the Portainer API and verified 2026-10-08: Portainer's
-  `ConfigHash` read `2db3890`, and the live bundle serves `v1.48.0` with
-  the Ledger tab) -- this includes everything in the "Done" list at the
+  method). Confirmed live and up to date as of commit `91c4a9c`
+  (v2.0 -- redeployed via the Portainer API and verified 2026-10-09:
+  Portainer's `ConfigHash` read `91c4a9c`, the live bundle serves
+  `v2.51.0`, and the lessons API returns 200). Earlier, `2db3890`
+  (2026-10-08) put the Ledger live -- this includes everything in the "Done" list at the
   bottom of this file plus the transactions ledger (V1 of the accounting
   system). `migrate-add-transactions-table.sql` was run against the live
   DB the same day (table exists, endpoints return 200, ledger empty --
@@ -99,9 +100,15 @@ is paid.
 NOT `docker/init-db/` (every `.sql` file in `init-db/` runs on a fresh
 install and a non-idempotent one breaks it -- see "Code review findings"
 item 1), and are written idempotent (`IF NOT EXISTS`). The v2.0 one is
-`docker/migrations/2026-10-08-lessons.sql` -- **NOT yet run against the
-live DB** (applied locally only, 2026-10-08). `01-schema.sql` already
-contains everything for fresh installs.
+`docker/migrations/2026-10-08-lessons.sql` -- **run against the live DB
+2026-10-09** (verified: `customers.is_student`/`lesson_rate` exist, the
+`lessons` table exists and was empty, all 6 customers intact).
+`01-schema.sql` already contains everything for fresh installs.
+Deployment order used, worth repeating for additive migrations: pipe the
+file into the DB container over SSH (`cat file | ssh dockernuc.local
+"docker exec -i lcc-mariadb sh -c 'cat > /tmp/x.sql'"` -- no sudo needed),
+have the user `source` it at the MariaDB prompt (the only step needing the
+DB password), THEN redeploy, so new code never meets the old schema.
 
 Every table's `id` column is `AUTO_INCREMENT`. Tables migrated from Notion
 (customers, technicians, parts_vendors, instruments, parts_inventory,
